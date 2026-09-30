@@ -12,7 +12,10 @@
 // hard error instead of MAME's undefined behaviour. See THIRD_PARTY.md.
 #pragma once
 
+#include "runtime/paged_rom.h"
+
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -49,19 +52,27 @@ struct GeoPoly {
 struct GeoPtr {
     uint32_t *base = nullptr;
     uint32_t size = 0, i = 0;
-    bool null() const { return base == nullptr; }
-    uint32_t &at() const {
+    const PagedRom *file = nullptr;
+    bool null() const { return base == nullptr && file == nullptr; }
+    uint32_t at() const {
+        if (file) return file->read32((i & (size - 1)) * 4);
         if (!base) throw GeoFatal("geometrizer read from missing memory");
         return base[i & (size - 1)];
     }
-    uint32_t &operator*() const { return at(); }
+    void write(uint32_t value) const {
+        if (!base || file) throw GeoFatal("geometrizer write to read-only or missing memory");
+        base[i & (size - 1)] = value;
+    }
+    uint32_t operator*() const { return at(); }
     GeoPtr operator++(int) { GeoPtr t = *this; ++i; return t; }
     GeoPtr &operator+=(uint32_t n) { i += n; return *this; }
 };
 struct GeoPtr16 {
     const uint16_t *base = nullptr;
     uint32_t size = 0, i = 0;
+    const PagedRom *file = nullptr;
     uint16_t operator*() const {
+        if (file) return file->read16((i & (size - 1)) * 2);
         if (!base) throw GeoFatal("rasterizer read from missing texture memory");
         return base[i & (size - 1)];
     }
@@ -73,7 +84,8 @@ public:
     // polygons: the model ROM (0x1000000 bytes); textures: the texture ROM
     // (0x1000000 bytes); buffer: buffer RAM (0x8000 dwords), which the
     // display list is read from.
-    Geo(const std::vector<uint8_t> &polygons, const std::vector<uint8_t> &textures, uint32_t *buffer);
+    Geo(const std::vector<uint8_t> &polygons, const std::vector<uint8_t> &textures, uint32_t *buffer,
+        std::shared_ptr<PagedRom> polygons_file = {}, std::shared_ptr<PagedRom> textures_file = {});
 
     // MAME screen_vblank -> geo_parse: walk this frame's display list from
     // read_start (the geometrizer's read-start register).
@@ -95,6 +107,7 @@ public:
     };
     struct raster_state {
         const uint16_t *texture_rom = nullptr;
+        const PagedRom *texture_file = nullptr;
         uint32_t texture_rom_mask = 0;
         int16_t viewport[4] = {0, 0, 0, 0};
         int16_t center[4][2] = {{0, 0}, {0, 0}, {0, 0}, {0, 0}};
@@ -117,6 +130,7 @@ public:
         raster_state *raster = nullptr;
         uint32_t mode = 0;
         uint32_t *polygon_rom = nullptr;
+        const PagedRom *polygon_file = nullptr;
         uint32_t polygon_rom_mask = 0;
         float matrix[12] = {};
         GeoVertex focus, light;
@@ -136,6 +150,7 @@ public:
 
 private:
     int wide_margin_ = 0;
+    std::shared_ptr<PagedRom> polygon_file_, texture_file_;
     std::vector<uint32_t> polygon_rom_;
     std::vector<uint16_t> texture_rom_;
     uint32_t *buffer_;

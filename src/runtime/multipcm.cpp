@@ -26,7 +26,7 @@ const float AMPLITUDE_SCALE_LIMIT[8] = {0.0f, 0.4f, 0.8f, 1.5f, 3.0f, 6.0f, 12.0
 const int32_t VALUE_TO_CHANNEL[32] = {0,  1,  2,  3,  4,  5,  6,  -1, 7,  8,  9,  10, 11, 12, 13, -1,
                                       14, 15, 16, 17, 18, 19, 20, -1, 21, 22, 23, 24, 25, 26, 27, -1};
 
-int32_t clamp16(int32_t v) { return std::clamp(v, -32768, 32767); }
+int32_t clamp16(int32_t v) { return std::clamp<int32_t>(v, -32768, 32767); }
 
 } // namespace
 
@@ -181,7 +181,7 @@ int32_t MultiPcm::envelope_generator_update(Slot &slot) {
 uint32_t MultiPcm::get_rate(const uint32_t *steps, int32_t rate, uint32_t val) {
     if (val == 0) return steps[0];
     if (val == 0xf) return steps[0x3f];
-    const int r = std::clamp(4 * int(val) + rate, 0, 0x3f);
+    const int r = std::clamp<int32_t>(4 * int(val) + rate, 0, 0x3f);
     return steps[r];
 }
 

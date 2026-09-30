@@ -1,5 +1,91 @@
 # Handoff
 
+## Experimental PSP-1000 frontend (2026-10-01)
+
+The completed Vita/native-audio work was fast-forwarded to main and pushed to
+GitHub; main/origin main is `8159b0135f3652ee10fd3876f6c21e1db7351118`.
+PSP development is isolated on `psp-native-frontend`, not merged back into main.
+
+The new `platform/psp` frontend builds with public PSPDEV/PSPSDK to a private
+EBOOT.PBP. It statically recompiles the existing game/TGP code, uses native
+PSPSDK GU presentation/input, and runs the shared native 48 kHz audio engine
+on a dedicated thread. No SDL, interpreter, firmware patch or game-derived
+source/data is committed. CPU/bus clocks are 333/166 MHz. Controls, pause menu,
+volume/mute, aspect, presentation skip and cabinet/settings persistence are
+implemented. Native audio remains experimental; there is no reference-backend
+fallback on PSP.
+
+PSP-1000 has 32 MB physical memory and a 24 MiB user partition shared by code,
+heap and stacks. ARK-5's high-memory source explicitly excludes PSP-1000;
+it does not provide SD-card swap. The port instead pages immutable ROMs through
+4 KiB read-only caches: 832 KiB main-board and 512 KiB audio payload, separate
+ownership/files per thread. Mutable board RAM remains resident. M2_LOW_MEMORY
+uses sparse page tables and avoids unused external-GPU layer allocations.
+Default desktop/Vita memory layouts and the reference renderer remain intact.
+
+Validation completed so far:
+
+- CTest: 25 passed, two optional Lua tests skipped (lupa unavailable).
+- Full host build and synthetic paging, sample-reader, controls, audio queue
+  and lifetime tests pass; paging/sample-reader/audio sanitizer runs pass.
+- Build and private-install helper tests pass without any game data.
+- 6,000-frame dense/paged host race: 196,665,345 i960 and 223,429,779 TGP
+  instructions, identical geometry, board/video memory and sound commands.
+  Both boards in this test use sparse tables and the exact PSP render flags.
+- A visible 240-frame attract window (1440-1679) matches every CPU-rendered
+  pixel and hash, digest `c49a1f7f0e07f872`. All 1,680 attract frames also
+  match; final `c24dbbad1b5f898f` matches the ordinary desktop m2run, with
+  52,998,145 i960 / 46,157,202 TGP instructions on both builds.
+- The shared changes also rebuild and package for Vita with logging OFF;
+  the archived GPU25 release was not overwritten. No new Vita hardware test.
+- PSP cross-compilation, PBP/PRX imports and SFO MEMSIZE=0 pass. ROM preparation
+  uses the existing CRC/SHA-checked importer into ignored private build output.
+- Final isolated PPSSPPSDL 1.20.4 original-PSP (PSPModel=0) smoke completed
+  600 frames with status=ok in 244.214 seconds (about 2.46 frames/s including
+  startup). Boot settings and textured 3D attract scenes visibly rendered.
+  Final framebuffer hash `36945e52a376dc48` matches desktop m2run at 600
+  frames. Audio shutdown succeeds with zero invalid/unsupported/error results,
+  but 453 audio blocks exceeded 10.667 ms (peak 96.472 ms) and the emulator
+  logged underruns. This is NOT smooth playback or physical hardware proof.
+  Final malloc arena used 18,083,336 bytes, free 773,624 bytes; kernel free
+  memory was 1,306,624 bytes. Those different pools must not be conflated.
+- Private install folder: `build/psp-test01/PSP/GAME/DAYTONA`, prepared with
+  verified ROMs and no smoke files. EBOOT is 4,523,666 bytes, SHA256
+  `911e4fbdbfc788794154e37244952918973ed7327cdfa5d00f479f07d67751ad`.
+  PRX loaded size is 0x3c7370 bytes; full game-derived binaries remain ignored.
+
+Findings, including rejected assumptions:
+
+- A direct-mapped cache caused 3.623 GB of main-board reads over the host
+  6,000-frame race. Four-way replacement plus a last-page shortcut reduced
+  that to 1.461 GB with the same payload budget. It still may stall a real
+  Memory Stick; audio reads are additional, and startup is included.
+- PSPSDK's PBP helper treats numeric MEMSIZE=0 as missing and defaults to 1.
+  The PSP build creates an explicit SFO to retain the original-PSP RAM limit.
+- Runtime/C++ libraries linked after SDK import libraries produced unsafe
+  out-of-order imports. Explicit runtime-first link ordering fixes the package.
+- PSP int32_t is long, unlike the host's int. Explicit int32_t template
+  arguments in raster/MultiPCM preserve arithmetic while making these compile.
+- Stock PPSSPPHeadless forces the Slim model; use isolated PPSSPPSDL with
+  PSPModel=0 for an original-PSP memory test, not a headless success claim.
+- The first 600-frame emulator attempt did not finish before its 240-second
+  timeout. A shorter test found SRC release returning 0x80268002 (channel still
+  reserved), not the generic 0x80260002 output-busy code. This exposed a drain
+  handling bug. Both known busy codes now retry for up to 250 ms; unknown
+  errors and timeouts still fail. Optimized/ASan/UBSan/TSan regressions cover
+  successful drain, timeout, unknown errors and retained output-buffer lifetime.
+- The first 120-frame test had no active voices and no over-budget audio blocks
+  (peak 1.031 ms); board wall time was about 117 ms/frame. Do not blame audio
+  starvation or claim smooth PSP gameplay from this silent boot test.
+- Presentation skipping only reduces GU uploads. It deliberately does not skip
+  board instructions, geometry, sound commands or CPU rasterization.
+
+Reproduce via `platform/psp/README.md` and `scripts/test_psp_memory.sh`.
+Next: profile/replace the slow PSP CPU rendering and storage hot paths, then
+validate the private install on an actual PSP-1000: full race, active audio, pause/resume/reset,
+save persistence and shutdown. CPU rasterization and ROM I/O remain performance
+risks; there is no verified smooth hardware gameplay result yet.
+
 ## Current state
 
 **Draw distance (enhancement, off by default).** Launcher slider (Shortest,
@@ -717,6 +803,12 @@ Also found:
   unconfirmed on the PCB.
 
 ## What not to re-propose
+
+- ARK expanded RAM or SD swap as a PSP-1000 memory fix: its high-memory
+  path explicitly excludes this model. File-backed ROM caching is different.
+- A PSP compile or original-model emulator boot as smooth hardware proof.
+  The initial 600-frame PSP smoke is only about 2.46 frames/s.
+- Presentation skipping as a CPU-raster optimization: it only skips upload.
 
 - SCSP for Daytona. It is the Model 1 sound board (MAME `model2o` config and
   the MiSTer core's working sound on hardware).

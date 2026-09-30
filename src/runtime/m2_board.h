@@ -56,6 +56,9 @@ public:
     struct Images {
         std::vector<uint8_t> program, main_data, copro_tables, copro_data, polygons, textures;
         std::vector<uint8_t> sound_program, pcm1, pcm2; // sound board (68000 program, MultiPCM samples)
+        // Handheld opt-in: only a supplied file replaces its corresponding
+        // dense vector. Logical sizes and address masks remain unchanged.
+        std::shared_ptr<PagedRom> program_file, main_data_file, copro_data_file, polygons_file, textures_file;
     };
     explicit M2Board(Images images);
 
@@ -89,15 +92,27 @@ public:
     std::vector<uint8_t> &backup_ram() { return backup_; }
 
 private:
-    enum Kind : uint8_t { Unmapped, Rom, Ram, Tex, Dev };
+    enum Kind : uint8_t { Unmapped, Rom, Ram, Tex, Dev, FileProgram, FileMainData };
     struct Page {
         Kind kind = Unmapped;
         bool burst = false;
-        uint8_t *base = nullptr;
+        union {
+            uint8_t *base = nullptr;
+            uint32_t file_offset;
+        };
     };
     static constexpr unsigned kPageBits = 12;
-    Page &page(uint32_t addr) { return pages_[addr >> kPageBits]; }
+    const Page &page(uint32_t addr) const {
+#ifdef M2_LOW_MEMORY
+        const auto &group = pages_[addr >> 22];
+        return group ? group[(addr >> kPageBits) & 1023] : unmapped_page_;
+#else
+        return pages_[addr >> kPageBits];
+#endif
+    }
+    Page &mapped_page(uint32_t addr);
     void map(uint32_t start, uint32_t end, Kind k, uint8_t *base, uint32_t mirror = 0, bool burst = true);
+    void map_file(uint32_t start, uint32_t end, Kind kind, uint32_t offset);
 
     // Device dword access: data in its byte lanes, mask = lanes accessed.
     uint32_t dev_read(uint32_t addr, uint32_t mask);
@@ -112,7 +127,12 @@ private:
     Images img_;
     std::vector<uint8_t> ram_, work_, cpuctl_, backup_, tile_, chr_, palette_, xlat_, tex0_, tex1_, luma_, fb_a_, fb_b_,
         comm_;
+#ifdef M2_LOW_MEMORY
+    std::array<std::unique_ptr<Page[]>, 1024> pages_{};
+    const Page unmapped_page_{};
+#else
     std::vector<Page> pages_;
+#endif
 
     TgpBoard tgp_;
     std::unique_ptr<Geo> geo_;

@@ -7,6 +7,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <memory>
+
+namespace rt { class PagedRom; }
 
 namespace snd {
 class NativeSoundEngine {
@@ -18,6 +21,9 @@ public:
     };
     NativeSoundEngine(std::vector<uint8_t> program, std::vector<uint8_t> pcm1,
                       std::vector<uint8_t> pcm2);
+    // PSP: bounded PCM caches owned only by this engine's audio thread.
+    NativeSoundEngine(std::vector<uint8_t> program, std::shared_ptr<rt::PagedRom> pcm1,
+                      std::shared_ptr<rt::PagedRom> pcm2);
     NativeSoundEngine(const NativeSoundEngine &) = delete;
     NativeSoundEngine &operator=(const NativeSoundEngine &) = delete;
     void send(const uint8_t *bytes, size_t count);
@@ -27,6 +33,7 @@ public:
 private:
     std::vector<uint8_t> program_;
     std::array<std::vector<uint8_t>, 2> pcm_;
+    std::array<std::shared_ptr<rt::PagedRom>, 2> pcm_files_;
     std::array<std::array<NativeSampleBank, 4>, 2> banks_;
     NativeSampleMixer mixer_;
     NativeSoundSequencer sequencer_;

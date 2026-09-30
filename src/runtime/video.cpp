@@ -25,8 +25,11 @@ inline uint32_t rgb(uint32_t r, uint32_t g, uint32_t b) { return 0xff000000u | (
 } // namespace
 
 Video::Video(const uint8_t *tile_ram, const uint8_t *char_ram)
-    : tile_ram_(tile_ram), char_ram_(char_ram), screen_(size_t(W) * H), sys24_(size_t(W) * (H + 4)),
-      background_gpu_(size_t(W) * H), foreground_gpu_(size_t(W) * H) {
+    : tile_ram_(tile_ram), char_ram_(char_ram), screen_(size_t(W) * H), sys24_(size_t(W) * (H + 4))
+#ifndef M2_LOW_MEMORY
+      , background_gpu_(size_t(W) * H), foreground_gpu_(size_t(W) * H)
+#endif
+{
     for (auto &p : pens_) p = rgb(0, 0, 0); // palette_device starts black
     for (int i = 0; i < 256; i++) gamma_[i] = uint8_t(std::max((double(i) - 64.0) * 255.0 / 191.0, 0.0));
     for (int l = 0; l < 4; l++) pixmap_[l].assign(512 * 512, 0), flags_[l].assign(512 * 512, 0);

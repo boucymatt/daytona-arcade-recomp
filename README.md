@@ -62,6 +62,13 @@ Linux and macOS).
 
 After changing the recompiler or the seeds: `python3 scripts/recompile.py`.
 
+## Handheld frontends
+
+- [PS Vita](platform/vita/README.md): native frontend and audio options.
+- [PSP-1000](platform/psp/README.md): experimental 32 MB port, native threaded
+  audio and Memory Stick-backed ROM caches. Hardware performance is not yet
+  verified; this is not a smooth-gameplay release.
+
 ## Playing
 
     build/daytona

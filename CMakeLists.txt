@@ -96,6 +96,7 @@ add_library(runtime STATIC
     src/runtime/native_sound_sequencer.cpp
     src/runtime/native_sound_engine.cpp
     src/runtime/enhance.cpp
+    src/runtime/paged_rom.cpp
 )
 target_include_directories(runtime PUBLIC src)
 # 7z ROM sets: the 7-Zip LZMA SDK's decoder (public-domain files only),
@@ -255,11 +256,11 @@ target_link_libraries(traceinfo PRIVATE trace)
 enable_testing()
 
 # Geometrizer clipping and display-list streaming (shared runtime code).
-add_executable(test_geo_clip tests/test_geo_clip.cpp)
+add_executable(test_geo_clip tests/test_geo_clip.cpp src/runtime/paged_rom.cpp)
 target_include_directories(test_geo_clip PRIVATE src)
 add_test(NAME geo_clip COMMAND test_geo_clip)
 
-add_executable(test_geo_stream tests/test_geo_stream.cpp)
+add_executable(test_geo_stream tests/test_geo_stream.cpp src/runtime/paged_rom.cpp)
 target_include_directories(test_geo_stream PRIVATE src)
 add_test(NAME geo_stream COMMAND test_geo_stream)
 
@@ -276,6 +277,22 @@ target_link_libraries(test_fp PRIVATE i960)
 find_package(Threads REQUIRED)
 target_link_libraries(test_fp PRIVATE Threads::Threads)
 add_test(NAME fp COMMAND test_fp)
+
+add_executable(test_psp_controls tests/test_psp_controls.cpp)
+target_include_directories(test_psp_controls PRIVATE platform/psp)
+add_test(NAME psp_controls COMMAND test_psp_controls)
+add_executable(test_psp_native_audio tests/test_psp_native_audio.cpp)
+target_include_directories(test_psp_native_audio PRIVATE tests/psp_audio_shim)
+target_link_libraries(test_psp_native_audio PRIVATE Threads::Threads)
+add_test(NAME psp_native_audio COMMAND test_psp_native_audio)
+
+add_executable(test_paged_rom tests/test_paged_rom.cpp src/runtime/paged_rom.cpp)
+target_include_directories(test_paged_rom PRIVATE src)
+add_test(NAME paged_rom COMMAND test_paged_rom)
+
+add_executable(test_native_sample_reader tests/test_native_sample_reader.cpp src/runtime/native_sample_mixer.cpp)
+target_include_directories(test_native_sample_reader PRIVATE src/runtime)
+add_test(NAME native_sample_reader COMMAND test_native_sample_reader)
 
 add_executable(test_native_sample_mixer tests/test_native_sample_mixer.cpp src/runtime/native_sample_mixer.cpp)
 target_include_directories(test_native_sample_mixer PRIVATE src/runtime)
@@ -356,6 +373,8 @@ add_test(NAME trace COMMAND test_trace ${CMAKE_CURRENT_BINARY_DIR})
 # The MAME plugin's Lua core against the C++ trace library (needs lupa).
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
+    add_test(NAME psp_build_helper COMMAND Python3::Interpreter ${CMAKE_SOURCE_DIR}/tests/test_build_psp.py)
+    add_test(NAME psp_prepare_helper COMMAND Python3::Interpreter ${CMAKE_SOURCE_DIR}/tests/test_prepare_psp.py)
     add_test(NAME lua_core
         COMMAND Python3::Interpreter ${CMAKE_SOURCE_DIR}/tests/lua_core_test.py
                 ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/lua_core)

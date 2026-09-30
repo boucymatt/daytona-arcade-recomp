@@ -11,6 +11,9 @@ namespace snd {
 
 class NativeSampleBank {
 public:
+    // Optional file-backed source for constrained hosts. The reader may throw
+    // on I/O failure; its storage belongs to the audio owner thread.
+    using ByteReader = uint8_t (*)(const void*, uint32_t);
     static constexpr unsigned kSamples = 512;
     enum class Format : uint8_t { Signed8, PackedSigned12 };
     enum class Status : uint8_t { MissingTable, InvalidLoop, UnmappedData, Valid };
@@ -34,18 +37,23 @@ public:
     // fixed first 512*12 bytes; logical 0x100000..0x1fffff selects data_bank.
     // Success means the table exists, not that every sample entry is valid.
     bool load(const uint8_t* rom, size_t bytes, unsigned data_bank) noexcept;
+    bool load(ByteReader reader, const void* context, size_t bytes, unsigned data_bank);
     const Sample* sample(unsigned index) const noexcept;
     Status status(unsigned index) const noexcept;
     unsigned valid_sample_count() const noexcept { return valid_count_; }
     unsigned data_bank() const noexcept { return data_bank_; }
-    float value(unsigned index, uint32_t frame) const noexcept;
+    float value(unsigned index, uint32_t frame) const;
 
 private:
     friend class NativeSampleMixer;
-    uint8_t byte(uint32_t logical) const noexcept;
-    float value(const Sample& sample, uint32_t frame) const noexcept;
+    bool load_source(const uint8_t* rom, ByteReader reader, const void* context,
+                     size_t bytes, unsigned data_bank);
+    uint8_t byte(uint32_t logical) const;
+    float value(const Sample& sample, uint32_t frame) const;
     bool mapped_range(uint32_t start, uint32_t bytes) const noexcept;
     const uint8_t* rom_ = nullptr;
+    ByteReader reader_ = nullptr;
+    const void* reader_context_ = nullptr;
     size_t rom_bytes_ = 0;
     unsigned data_bank_ = 0, valid_count_ = 0;
     std::array<Sample, kSamples> samples_{};
@@ -107,7 +115,8 @@ public:
     // equal-power pan and linear ADSR are intentionally not chip-bit-exact.
     // Nominal source range is [-1,1); master gain precedes peak protection.
     // Limiter state persists across render calls; rendering adds no latency.
-    void render(float* interleaved_stereo, size_t frames) noexcept;
+    // Resident sources cannot fail; file-reader errors propagate to the frontend.
+    void render(float* interleaved_stereo, size_t frames);
 
 private:
     enum class Stage : uint8_t { Attack, Decay, Sustain, Release };

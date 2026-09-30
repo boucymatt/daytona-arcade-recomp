@@ -59,7 +59,16 @@ public:
     }
     // Vita GPU-fast path: keep the exact CPU tile layers, but let the host
     // draw the 3D polygons. The normal desktop/CPU path remains the default.
-    void set_external_3d(bool enabled) { external_3d_ = enabled; render_done_ = false; }
+    void set_external_3d(bool enabled) {
+#ifdef M2_LOW_MEMORY
+        // CPU-only constrained frontends do not need two full GPU layers.
+        if (enabled) {
+            background_gpu_.resize(size_t(W) * H);
+            foreground_gpu_.resize(size_t(W) * H);
+        }
+#endif
+        external_3d_ = enabled; render_done_ = false;
+    }
     bool external_3d() const { return external_3d_; }
     const std::vector<uint32_t> &background_layer() const { return background_gpu_; }
     const std::vector<uint32_t> &foreground_layer() const { return foreground_gpu_; }

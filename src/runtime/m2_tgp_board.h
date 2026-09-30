@@ -6,9 +6,11 @@
 #pragma once
 
 #include "runtime/tgp.h"
+#include "runtime/paged_rom.h"
 
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <vector>
 
 namespace rt {
@@ -16,7 +18,8 @@ namespace rt {
 class TgpBoard : public TgpBus {
 public:
     // tables: copro_tgp_tables (0x40000 bytes); copro_data: 0x800000 bytes.
-    TgpBoard(const std::vector<uint8_t> &tables, const std::vector<uint8_t> &copro_data);
+    TgpBoard(const std::vector<uint8_t> &tables, const std::vector<uint8_t> &copro_data,
+             std::shared_ptr<PagedRom> copro_file = {});
 
     // i960 accesses (dword offsets within each range, MAME's handlers).
     void function_port_w(uint32_t offset, uint32_t data);  // 0x00880000
@@ -53,6 +56,7 @@ private:
 
     Tgp tgp_;
     std::vector<uint32_t> tables_, copro_data_;
+    std::shared_ptr<PagedRom> copro_file_;
     std::deque<uint32_t> in_, out_;
     std::vector<uint32_t> upload_;
     uint32_t coproctl_ = 0, geoctl_ = 0, geo_write_start_ = 0, geo_read_start_ = 0;

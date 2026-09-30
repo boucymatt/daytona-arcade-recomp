@@ -80,6 +80,30 @@ The recompiler runs at build time on the user's machine, so no generated Sega co
 
 **Frame loop.** One host frame = one Model 2 video frame. The runtime runs generated code until the game waits on vblank, fires the vblank interrupt handler, drains the TGP FIFO into a display list, then renders and presents. The sound board then advances one frame of board time on the same thread (see Audio).
 
+**PSP-1000 frontend (experimental).** The host still statically recompiles the
+same game/TGP code; PSPDEV cross-compiles it to Allegrex. Public PSPSDK APIs
+replace SDL only at the platform boundary. The reference CPU renderer draws
+496x384 and GU presents an RGB565 framebuffer; there is no second shader path.
+The dedicated native audio thread is the only PSP sound backend and never runs
+the reference sound board. The frame-loop paragraph above describes reference
+sound; native audio advances independently at the device clock.
+
+The PSP-1000 target explicitly requests normal memory (SFO MEMSIZE=0). Large
+immutable ROMs use checked, file-backed 4 KiB caches without changing logical
+sizes/address masks: 832 KiB for the main board, 512 KiB for audio. Mutable
+board RAM stays resident. M2_LOW_MEMORY selects a sparse page table and lazy
+allocation of unused external-GPU layer buffers; desktop and Vita defaults
+remain dense. SD/Memory Stick caching is not expanded physical RAM or firmware
+swap. I/O errors fail visibly instead of supplying dummy ROM data.
+
+Host tests compare resident/paged ROM reads, 6,000 race frames of geometry and
+board state, and 240 CPU-rendered attract frames pixel for pixel. These checks
+do not establish PSP hardware speed, full-race framebuffer/MAME parity on PSP,
+or audio perceptual parity. The exact CPU rasterizer and random storage reads
+are known performance risks; presentation skipping must not omit game frames,
+geometry updates, audio commands or CPU raster work. See platform/psp/README.md
+for build and hardware-validation requirements.
+
 **Memory bus.** Main RAM, work RAM and shared RAM are flat host arrays accessed inline. MMIO ranges (TGP FIFO, geometrizer, tilemap RAM, palette, I/O dual-port RAM, sound UART, comm RAM) go through a page-table of handlers, resolved at compile time where the address is constant.
 
 **No fallback.** Every instruction the game runs is statically recompiled to native code. There is no interpreter in the shipped build. A jump to an address with no recompiled code is a hard error that names the address; the fix is to add it to `seeds/daytona93.txt` and recompile. The runtime (`src/runtime/cpu`) holds the i960 context and the services generated code calls (call/return with the register cache, interrupt entry, memory); it has no interpreter. The reference interpreter in `src/refcore` exists only for the test harness (`m2replay`) and is never linked into the game (`m2native` does not link it).
