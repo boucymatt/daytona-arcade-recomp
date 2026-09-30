@@ -71,6 +71,12 @@ public:
     // gpu_pens). Vita uses its separate GXM tile path, also with widescreen.
     void set_external_3d(bool enabled, bool desktop = false) {
         if (enabled == external_3d_ && desktop == desktop_) return;
+#ifdef M2_LOW_MEMORY
+        if (enabled) {
+            background_gpu_.resize(size_t(width()) * H);
+            foreground_gpu_.resize(size_t(width()) * H);
+        }
+#endif
         external_3d_ = enabled;
         desktop_ = desktop;
 #ifndef M2_VITA_RENDER_OPT

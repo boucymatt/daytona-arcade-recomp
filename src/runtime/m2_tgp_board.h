@@ -7,9 +7,11 @@
 
 #include "runtime/rom_source.h"
 #include "runtime/tgp.h"
+#include "runtime/paged_rom.h"
 
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <vector>
 
 namespace rt {
@@ -18,7 +20,8 @@ namespace rt {
 class TgpBoard : public TgpBus {
 public:
     // tables: copro_tgp_tables (0x40000 bytes); copro_data: 0x800000 bytes.
-    TgpBoard(const std::vector<uint8_t> &tables, const std::vector<uint8_t> &copro_data);
+    TgpBoard(const std::vector<uint8_t> &tables, const std::vector<uint8_t> &copro_data,
+             std::shared_ptr<PagedRom> copro_file = {});
 #ifdef M2_DC_MEMORY
     // copro_data read through pages (RomRegion::CoproData), not copied.
     TgpBoard(const std::vector<uint8_t> &tables, RomSource &rom);
@@ -59,6 +62,7 @@ private:
 
     Tgp tgp_;
     std::vector<uint32_t> tables_, copro_data_;
+    std::shared_ptr<PagedRom> copro_file_;
 #ifdef M2_DC_MEMORY
     RomSource *rom_ = nullptr;
 #endif

@@ -21,18 +21,35 @@ uint32_t seconds_to_frames(float seconds) noexcept {
 
 bool NativeSampleBank::load(const uint8_t* rom, size_t bytes,
                             unsigned data_bank) noexcept {
+    return load_source(rom, nullptr, nullptr, bytes, data_bank);
+}
+
+bool NativeSampleBank::load(ByteReader reader, const void* context, size_t bytes,
+                            unsigned data_bank) {
+    return load_source(nullptr, reader, context, bytes, data_bank);
+}
+
+bool NativeSampleBank::load_source(const uint8_t* rom, ByteReader reader,
+                                   const void* context, size_t bytes, unsigned data_bank) {
     rom_ = nullptr;
+    reader_ = nullptr;
+    reader_context_ = nullptr;
     rom_bytes_ = 0;
     data_bank_ = 0;
     valid_count_ = 0;
     samples_.fill({});
     status_.fill(Status::MissingTable);
-    if (!rom || bytes < kSamples * 12 || data_bank >= 4) return false;
+    if ((!rom && (!reader || !context)) || bytes < kSamples * 12 || data_bank >= 4) return false;
     rom_ = rom;
+    reader_ = reader;
+    reader_context_ = context;
     rom_bytes_ = bytes;
     data_bank_ = data_bank;
     for (unsigned index = 0; index < kSamples; ++index) {
-        const uint8_t* h = rom + index * 12;
+        uint8_t header[12];
+        if (reader_)
+            for (unsigned i = 0; i < 12; ++i) header[i] = reader_(reader_context_, index * 12 + i);
+        const uint8_t* h = reader_ ? header : rom + index * 12;
         const uint32_t address = uint32_t(h[0]) << 16 |
                                  uint32_t(h[1]) << 8 | h[2];
         Sample& s = samples_[index];
@@ -63,7 +80,7 @@ bool NativeSampleBank::load(const uint8_t* rom, size_t bytes,
 }
 
 bool NativeSampleBank::mapped_range(uint32_t start, uint32_t bytes) const noexcept {
-    if (!rom_ || start >= 2 * kWindow || bytes > 2 * kWindow - start) return false;
+    if ((!rom_ && !reader_) || start >= 2 * kWindow || bytes > 2 * kWindow - start) return false;
     const uint32_t end = start + bytes;
     if (start < kWindow && size_t(std::min(end, kWindow)) > rom_bytes_) return false;
     if (end > kWindow) {
@@ -81,14 +98,14 @@ NativeSampleBank::Status NativeSampleBank::status(unsigned index) const noexcept
     return index < kSamples ? status_[index] : Status::MissingTable;
 }
 
-uint8_t NativeSampleBank::byte(uint32_t logical) const noexcept {
+uint8_t NativeSampleBank::byte(uint32_t logical) const {
     // Called only for ranges validated at load, and frame-bounded by value().
     const size_t physical = logical < kWindow ? logical :
         size_t(data_bank_) * kWindow + logical - kWindow;
-    return rom_[physical];
+    return reader_ ? reader_(reader_context_, uint32_t(physical)) : rom_[physical];
 }
 
-float NativeSampleBank::value(const Sample& s, uint32_t frame) const noexcept {
+float NativeSampleBank::value(const Sample& s, uint32_t frame) const {
     if (s.format == Format::Signed8) {
         const unsigned raw = byte(s.byte_start + frame);
         return float(raw < 128 ? int(raw) : int(raw) - 256) * (1.0f / 128.0f);
@@ -100,7 +117,7 @@ float NativeSampleBank::value(const Sample& s, uint32_t frame) const noexcept {
     return float(raw < 2048 ? int(raw) : int(raw) - 4096) * (1.0f / 2048.0f);
 }
 
-float NativeSampleBank::value(unsigned index, uint32_t frame) const noexcept {
+float NativeSampleBank::value(unsigned index, uint32_t frame) const {
     const Sample* s = sample(index);
     return s && frame < s->frames ? value(*s, frame) : 0.0f;
 }
@@ -258,7 +275,7 @@ void NativeSampleMixer::set_peak_limiter(bool enabled) noexcept {
     limiter_gain_ = 1.0f;
 }
 
-void NativeSampleMixer::render(float* out, size_t frames) noexcept {
+void NativeSampleMixer::render(float* out, size_t frames) {
     if (!out || frames > std::numeric_limits<size_t>::max() / 2) return;
     std::fill_n(out, frames * 2, 0.0f);
     for (Voice& v : voices_) {

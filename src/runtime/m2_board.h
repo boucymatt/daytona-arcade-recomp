@@ -72,6 +72,9 @@ public:
         RomSource *rom = nullptr;
         uint8_t *texture_ram = nullptr, *frame_buffer_ram = nullptr;
 #endif
+        // Handheld opt-in: only a supplied file replaces its corresponding
+        // dense vector. Logical sizes and address masks remain unchanged.
+        std::shared_ptr<PagedRom> program_file, main_data_file, copro_data_file, polygons_file, textures_file;
     };
     explicit M2Board(Images images);
 
@@ -122,11 +125,11 @@ public:
 #endif
 
 private:
-    enum Kind : uint8_t { Unmapped, Rom, Ram, Tex, Dev };
+    enum Kind : uint8_t { Unmapped, Rom, Ram, Tex, Dev, FileProgram, FileMainData };
     struct Page {
         Kind kind = Unmapped;
         bool burst = false;
-        uint8_t *base = nullptr;
+        union { uint8_t *base = nullptr; uint32_t file_offset; };
 #ifdef M2_DC_MEMORY
         RomRegion region = RomRegion::Program; // Rom pages: read through img_.rom, base is null
         uint32_t rom_offset = 0;
@@ -144,9 +147,19 @@ private:
     void map_rom(uint32_t start, uint32_t end, RomRegion region, uint32_t offset);
     const uint8_t *rom_page(const Page &p) { return img_.rom->page_fast(p.region, p.rom_offset >> kPageBits); }
 #else
-    Page &page(uint32_t addr) { return pages_[addr >> kPageBits]; }
+    const Page &page(uint32_t addr) const {
+#ifdef M2_LOW_MEMORY
+        const auto &group = pages_[addr >> 22];
+        return group ? group[(addr >> kPageBits) & 1023] : unmapped_page_;
+#else
+        return pages_[addr >> kPageBits];
 #endif
+    }
+
+#endif
+    Page &mapped_page(uint32_t addr);
     void map(uint32_t start, uint32_t end, Kind k, uint8_t *base, uint32_t mirror = 0, bool burst = true);
+    void map_file(uint32_t start, uint32_t end, Kind kind, uint32_t offset);
 
     // Device dword access: data in its byte lanes, mask = lanes accessed.
     uint32_t dev_read(uint32_t addr, uint32_t mask);
@@ -164,6 +177,9 @@ private:
 #ifdef M2_DC_MEMORY
     std::vector<std::unique_ptr<Page[]>> chunks_;
     static Page unmapped_; // what page() gives outside the map; never written
+#elif defined(M2_LOW_MEMORY)
+    std::array<std::unique_ptr<Page[]>, 1024> pages_{};
+    const Page unmapped_page_{};
 #else
     std::vector<Page> pages_;
 #endif

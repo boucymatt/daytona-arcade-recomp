@@ -8,6 +8,9 @@ Every component this project fetches, links or reads from is recorded here:
 upstream, pinned commit, licence, how it is used and what was changed.
 Vendored checkouts live in git-ignored `extern/` and are never committed.
 
+PSP-only public SDK/toolchain components and the development emulator are
+recorded with revisions and licences in [platform/psp/THIRD_PARTY.md](platform/psp/THIRD_PARTY.md).
+
 | Component | Upstream | Commit | Licence | Use | Changes |
 | --- | --- | --- | --- | --- | --- |
 | MAME `src/devices/cpu/i960/i960dis.cpp`, `i960dis.h` | https://github.com/mamedev/mame | `dddd73680656e355bb2b5beecab1167c9f07bf81` | BSD-3-Clause (file header) | Compiled unmodified into the `mame_oracle` test only, as the reference disassembler. Not linked into any tool or shipped binary. | None. `tests/mame_shim/emu.h` (ours) stands in for MAME's `emu.h`. |

@@ -35,7 +35,7 @@ Video::Video(const uint8_t *tile_ram, const uint8_t *char_ram)
 #else
       screen_(size_t(W) * H), sys24_(size_t(W) * (H + 4)),
 #endif
-#ifndef M2_DC_MEMORY
+#if !defined(M2_DC_MEMORY) && !defined(M2_LOW_MEMORY)
       // (Not on the Dreamcast: its layers are screen_ and sys24_ themselves.)
       background_gpu_(size_t(W) * H), foreground_gpu_(size_t(W) * H),
 #endif

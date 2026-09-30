@@ -35,9 +35,13 @@ std::vector<uint32_t> words(const std::vector<uint8_t> &b) {
 }
 } // namespace
 
-TgpBoard::TgpBoard(const std::vector<uint8_t> &tables, const std::vector<uint8_t> &copro_data)
-    : tables_(words(tables)), copro_data_(words(copro_data)) {
-    if (tables_.size() != 0x10000 || copro_data_.size() != 0x200000) throw TgpFatal("bad TGP table or copro data image");
+TgpBoard::TgpBoard(const std::vector<uint8_t> &tables, const std::vector<uint8_t> &copro_data,
+                   std::shared_ptr<PagedRom> copro_file)
+    : tables_(words(tables)), copro_data_(copro_file ? std::vector<uint32_t>{} : words(copro_data)),
+      copro_file_(std::move(copro_file)) {
+    if (tables_.size() != 0x10000 ||
+        (copro_file_ ? copro_file_->size() != 0x800000 : copro_data_.size() != 0x200000))
+        throw TgpFatal("bad TGP table or copro data image");
     tgp_.bus = this;
     tgp_.tables = tables_.data();
     // MAME machine_reset: "initialize bufferram to a sane default".
@@ -118,7 +122,10 @@ uint32_t TgpBoard::mem_r(uint32_t adr) {
 #ifdef M2_DC_MEMORY
     if (adr & 0x800000) return rom_->dword(RomRegion::CoproData, (adr & 0x1fffff) * 4);
 #else
-    if (adr & 0x800000) return copro_data_[adr & (copro_data_.size() - 1)];
+    if (adr & 0x800000) {
+        if (copro_file_) return copro_file_->read32((adr & 0x1fffff) * 4);
+        return copro_data_[adr & (copro_data_.size() - 1)];
+    }
 #endif
     if (adr & 0x400000) return buffer_[adr & 0x7fff];
     return 0;

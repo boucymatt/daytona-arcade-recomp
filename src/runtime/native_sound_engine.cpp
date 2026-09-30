@@ -1,4 +1,5 @@
 #include "runtime/native_sound_engine.h"
+#include "runtime/paged_rom.h"
 #include <stdexcept>
 #include <utility>
 
@@ -11,6 +12,23 @@ NativeSoundEngine::NativeSoundEngine(std::vector<uint8_t> program,
         for (unsigned bank = 0; bank < 4; ++bank)
             if (!banks_[rom][bank].load(pcm_[rom].data(), pcm_[rom].size(), bank))
                 throw std::runtime_error("native audio: missing PCM sample table");
+    sequencer_.set_sink(event, this);
+}
+
+NativeSoundEngine::NativeSoundEngine(std::vector<uint8_t> program,
+                                   std::shared_ptr<rt::PagedRom> pcm1,
+                                   std::shared_ptr<rt::PagedRom> pcm2)
+    : program_(std::move(program)), pcm_files_{std::move(pcm1), std::move(pcm2)},
+      sequencer_(program_, NativeSampleMixer::kOutputRate) {
+    const auto read = [](const void* source, uint32_t offset) {
+        return static_cast<const rt::PagedRom*>(source)->read8(offset);
+    };
+    for (unsigned rom = 0; rom < 2; ++rom) {
+        if (!pcm_files_[rom]) throw std::runtime_error("native audio: missing PCM file");
+        for (unsigned bank = 0; bank < 4; ++bank)
+            if (!banks_[rom][bank].load(read, pcm_files_[rom].get(), pcm_files_[rom]->size(), bank))
+                throw std::runtime_error("native audio: missing PCM sample table");
+    }
     sequencer_.set_sink(event, this);
 }
 

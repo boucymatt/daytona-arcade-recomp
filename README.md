@@ -94,6 +94,13 @@ GAME SYSTEM set **LINK ID** (one MASTER, the others SLAVE) and a different
 `--profile 2` (its own settings and saves) and give the two different ports,
 e.g. 15112 and 15113, each the other's as next.
 
+## Handheld frontends
+
+- [PS Vita](platform/vita/README.md): native frontend and audio options.
+- [PSP-1000](platform/psp/README.md): experimental 32 MB port, native threaded
+  audio and Memory Stick-backed ROM caches. Hardware performance is not yet
+  verified; this is not a smooth-gameplay release.
+
 ## Playing
 
     build/daytona

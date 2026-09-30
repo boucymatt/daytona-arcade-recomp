@@ -38,18 +38,25 @@ struct quad_m2 {
     int32_t texlod = 0;
 };
 
-Geo::Geo(const std::vector<uint8_t> &polygons, const std::vector<uint8_t> &textures, uint32_t *buffer)
-    : polygon_rom_(polygons.size() / 4), texture_rom_(textures.size() / 2), buffer_(buffer) {
-    if (polygon_rom_.empty() || (polygon_rom_.size() & (polygon_rom_.size() - 1)) || texture_rom_.empty() ||
-        (texture_rom_.size() & (texture_rom_.size() - 1)))
+Geo::Geo(const std::vector<uint8_t> &polygons, const std::vector<uint8_t> &textures, uint32_t *buffer,
+         std::shared_ptr<PagedRom> polygons_file, std::shared_ptr<PagedRom> textures_file)
+    : polygon_file_(std::move(polygons_file)), texture_file_(std::move(textures_file)),
+      polygon_rom_(polygon_file_ ? 0 : polygons.size() / 4),
+      texture_rom_(texture_file_ ? 0 : textures.size() / 2), buffer_(buffer) {
+    const size_t polygon_words = polygon_file_ ? polygon_file_->size() / 4 : polygon_rom_.size();
+    const size_t texture_words = texture_file_ ? texture_file_->size() / 2 : texture_rom_.size();
+    if (!polygon_words || (polygon_words & (polygon_words - 1)) || !texture_words ||
+        (texture_words & (texture_words - 1)))
         throw GeoFatal("bad polygon or texture ROM image");
-    std::memcpy(polygon_rom_.data(), polygons.data(), polygon_rom_.size() * 4);
-    std::memcpy(texture_rom_.data(), textures.data(), texture_rom_.size() * 2);
+    if (!polygon_file_) std::memcpy(polygon_rom_.data(), polygons.data(), polygon_words * 4);
+    if (!texture_file_) std::memcpy(texture_rom_.data(), textures.data(), texture_words * 2);
     raster_.texture_rom = texture_rom_.data();
-    raster_.texture_rom_mask = uint32_t(texture_rom_.size() - 1);
+    raster_.texture_file = texture_file_.get();
+    raster_.texture_rom_mask = uint32_t(texture_words - 1);
     geo_.raster = &raster_;
     geo_.polygon_rom = polygon_rom_.data();
-    geo_.polygon_rom_mask = uint32_t(polygon_rom_.size() - 1);
+    geo_.polygon_file = polygon_file_.get();
+    geo_.polygon_rom_mask = uint32_t(polygon_words - 1);
 }
 
 #ifdef M2_DC_MEMORY
@@ -372,7 +379,7 @@ void Geo::model2_3d_process_polygon(raster_state *raster, uint32_t attr)
 #ifdef M2_DC_MEMORY
 		tp = GeoPtr16{raster->texture_rom, raster->texture_rom_mask + 1, raster->command_buffer[0] & raster->texture_rom_mask, raster->rom};
 #else
-		tp = GeoPtr16{raster->texture_rom, raster->texture_rom_mask + 1, raster->command_buffer[0] & raster->texture_rom_mask};
+		tp = GeoPtr16{raster->texture_rom, raster->texture_rom_mask + 1, raster->command_buffer[0] & raster->texture_rom_mask, raster->texture_file};
 #endif
 
 #ifdef M2_DC_SPEED
@@ -401,7 +408,7 @@ void Geo::model2_3d_process_polygon(raster_state *raster, uint32_t attr)
 #ifdef M2_DC_MEMORY
 		th = GeoPtr16{raster->texture_rom, raster->texture_rom_mask + 1, raster->command_buffer[1] & raster->texture_rom_mask, raster->rom};
 #else
-		th = GeoPtr16{raster->texture_rom, raster->texture_rom_mask + 1, raster->command_buffer[1] & raster->texture_rom_mask};
+		th = GeoPtr16{raster->texture_rom, raster->texture_rom_mask + 1, raster->command_buffer[1] & raster->texture_rom_mask, raster->texture_file};
 #endif
 
 #ifdef M2_DC_SPEED
@@ -1617,7 +1624,7 @@ GeoPtr Geo::geo_object_data(geo_state *geo, uint32_t opcode, GeoPtr input)
 #ifdef M2_DC_MEMORY
 		obp = GeoPtr{geo->polygon_rom, geo->polygon_rom_mask + 1, oba & geo->polygon_rom_mask, geo->rom};
 #else
-		obp = GeoPtr{geo->polygon_rom, geo->polygon_rom_mask + 1, oba & geo->polygon_rom_mask};
+		obp = GeoPtr{geo->polygon_rom, geo->polygon_rom_mask + 1, oba & geo->polygon_rom_mask, geo->polygon_file};
 #endif
 	}
 	else
@@ -1792,7 +1799,7 @@ GeoPtr Geo::geo_polygon_data(geo_state *geo, uint32_t opcode, GeoPtr input)
 
 	/* move the data */
 	for (i = 0; i < count; i++)
-		*p++ = *input++;
+		(p++).write(*input++);
 
 	return input;
 }
@@ -2008,7 +2015,9 @@ GeoPtr Geo::geo_test(geo_state *geo, uint32_t opcode, GeoPtr input)
 #ifdef M2_DC_MEMORY
 			data = geo->rom->dword(RomRegion::Polygons, address++ * 4);
 #else
-			data = geo->polygon_rom[address++];
+			data = geo->polygon_file ? geo->polygon_file->read32((address & geo->polygon_rom_mask) * 4) :
+                geo->polygon_rom[address & geo->polygon_rom_mask];
+            ++address;
 #endif
 
 			address &= geo->polygon_rom_mask;
