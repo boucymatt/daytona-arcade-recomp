@@ -13,14 +13,14 @@ def main():
     if args.sanitize: dest=ROOT/'build/renderer-tests-sanitize'
     dest.mkdir(parents=True,exist_ok=True);ref=dest/'reference';ref.mkdir(exist_ok=True)
     base=args.reference_root/'src/runtime'
-    for name in ('geo.h','raster.h','video.h','video_profile.h','frame_profile.h','raster.cpp','video.cpp'):
+    for name in ('paged_rom.h','geo.h','raster.h','video.h','video_profile.h','frame_profile.h','raster.cpp','video.cpp'):
         path=base/name
         if not path.exists():continue
         text=path.read_text().replace('namespace rt {','namespace reference {')
         # The harness itself enables optimization. Its reference headers must
         # nevertheless have the same layout as the non-optimized objects.
         text=text.replace('M2_VITA_RENDER_OPT','M2_VITA_REFERENCE_NEVER_ENABLE')
-        text=re.sub(r'"runtime/(geo|raster|video|video_profile|frame_profile)\.h"',r'"reference/\1.h"',text)
+        text=re.sub(r'"runtime/(paged_rom|geo|raster|video|video_profile|frame_profile)\.h"',r'"reference/\1.h"',text)
         (ref/name).write_text(text)
     compiler=shlex.split(os.environ.get('CXX','c++'))
     flags=['-std=c++20','-fno-fast-math','-ffp-contract=off','-Wall','-Wextra','-Werror','-I',str(ROOT/'src'),'-I',str(dest)]

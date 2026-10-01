@@ -17,6 +17,13 @@
 #include <vector>
 
 namespace {
+#ifdef M2_PSP_NATIVE_VIDEO
+static_assert(rt::Video::OutputW == 480 && rt::Video::OutputH == 272);
+static_assert(rt::GameLoop::kWidth == 480 && rt::GameLoop::kHeight == 272);
+#else
+static_assert(rt::Video::OutputW == 496 && rt::Video::OutputH == 384);
+static_assert(rt::GameLoop::kWidth == 496 && rt::GameLoop::kHeight == 384);
+#endif
 unsigned number(const char *text) {
     errno = 0;
     char *end = nullptr;
@@ -111,6 +118,11 @@ int main(int argc, char **argv) {
         const std::array<std::shared_ptr<rt::PagedRom>, 5> files = {paged_images.program_file,
             paged_images.main_data_file, paged_images.copro_data_file, paged_images.polygons_file, paged_images.textures_file};
         rt::GameLoop dense(images(argv[1], false), false), paged(std::move(paged_images), false);
+        const unsigned width = paged.board().video().output_width();
+        const unsigned height = paged.board().video().output_height();
+        require(width == rt::Video::OutputW && height == rt::Video::OutputH &&
+                dense.board().video().output_width() == int(width) &&
+                dense.board().video().output_height() == int(height), "output dimensions", 0);
         dense.board().video().set_external_3d(true);
         paged.board().video().set_external_3d(true);
         // Dense-ROM and file-backed reads must preserve every mapping,
@@ -151,6 +163,8 @@ int main(int argc, char **argv) {
             require(dense.board().take_sound_bytes() == paged.board().take_sound_bytes(), "sound command", frame);
             compare_video(dense.board().video(), paged.board().video(), frame);
             if (render) {
+                require(dense.screen().size() == size_t(width) * height &&
+                        paged.screen().size() == size_t(width) * height, "CPU framebuffer size", frame);
                 require(dense.screen() == paged.screen(), "CPU framebuffer pixels", frame);
                 const uint64_t hash = paged.board().video().screen_hash();
                 require(dense.board().video().screen_hash() == hash, "CPU framebuffer hash", frame);
@@ -166,8 +180,8 @@ int main(int argc, char **argv) {
         require(screens_checked == render_frames, "render window coverage", count);
         if (render_frames) {
             require(raster_frames && nonblack_frames, "render window has no visible 3D frames", count);
-            std::printf("CPU framebuffer parity: start=%u frames=%u raster_frames=%u nonblack_frames=%u digest=%016llx last_hash=%016llx\n",
-                render_start, screens_checked, raster_frames, nonblack_frames,
+            std::printf("CPU framebuffer parity: output=%ux%u start=%u frames=%u raster_frames=%u nonblack_frames=%u digest=%016llx last_hash=%016llx\n",
+                width, height, render_start, screens_checked, raster_frames, nonblack_frames,
                 (unsigned long long)framebuffer_digest, (unsigned long long)last_framebuffer_hash);
         }
         size_t cache_bytes = 0;

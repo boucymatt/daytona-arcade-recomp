@@ -278,6 +278,21 @@ find_package(Threads REQUIRED)
 target_link_libraries(test_fp PRIVATE Threads::Threads)
 add_test(NAME fp COMMAND test_fp)
 
+# Separate native-resolution renderer tests keep desktop/Vita flags unchanged.
+add_executable(test_psp_raster tests/test_psp_raster.cpp src/runtime/raster.cpp)
+target_include_directories(test_psp_raster PRIVATE src)
+target_compile_definitions(test_psp_raster PRIVATE M2_PSP_NATIVE_VIDEO=1 M2_LOW_MEMORY=1)
+add_test(NAME psp_raster COMMAND test_psp_raster)
+
+add_library(psp_video_reference OBJECT tests/test_psp_video.cpp src/runtime/video.cpp src/runtime/raster.cpp)
+target_include_directories(psp_video_reference PRIVATE src)
+target_compile_definitions(psp_video_reference PRIVATE PSP_VIDEO_REFERENCE_ONLY=1 rt=psp_video_reference)
+add_executable(test_psp_video tests/test_psp_video.cpp src/runtime/video.cpp src/runtime/raster.cpp
+    $<TARGET_OBJECTS:psp_video_reference>)
+target_include_directories(test_psp_video PRIVATE src)
+target_compile_definitions(test_psp_video PRIVATE M2_PSP_NATIVE_VIDEO=1 M2_LOW_MEMORY=1)
+add_test(NAME psp_video COMMAND test_psp_video)
+
 add_executable(test_psp_controls tests/test_psp_controls.cpp)
 target_include_directories(test_psp_controls PRIVATE platform/psp)
 add_test(NAME psp_controls COMMAND test_psp_controls)
@@ -375,6 +390,7 @@ find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
     add_test(NAME psp_build_helper COMMAND Python3::Interpreter ${CMAKE_SOURCE_DIR}/tests/test_build_psp.py)
     add_test(NAME psp_prepare_helper COMMAND Python3::Interpreter ${CMAKE_SOURCE_DIR}/tests/test_prepare_psp.py)
+    add_test(NAME psp_memory_script COMMAND Python3::Interpreter ${CMAKE_SOURCE_DIR}/tests/test_psp_memory_script.py)
     add_test(NAME lua_core
         COMMAND Python3::Interpreter ${CMAKE_SOURCE_DIR}/tests/lua_core_test.py
                 ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/lua_core)

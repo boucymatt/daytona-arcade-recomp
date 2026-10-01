@@ -42,14 +42,14 @@ public:
     void frame_start() { render_done_ = false; }
     // MAME screen_update at the end of vblank: 2D back layers, the 3D layer
     // (drawn from `polys` once per geometrizer frame, then reused), 2D front
-    // layers. Output: 496x384, 0xAARRGGBB.
+    // layers. Output: OutputW x OutputH, 0xAARRGGBB.
     void screen_update(const std::vector<GeoPoly> &polys, int windows, const VideoMem &mem);
     const std::vector<uint32_t> &screen() const { return screen_; } // width() x H
     // Widescreen (enhancement, 0 = off): the screen grows by `margin` pixels on
     // each side. The 3D layer fills it; the tilemap layers (HUD, text) stay
     // 496 wide in the centre. Not available with external 3D (the Vita path).
     void set_wide_margin(int margin);
-    int width() const { return W + 2 * margin_; }
+    int width() const { return OutputW + 2 * margin_; }
     // With widescreen: the race HUD's side groups (lap times; position,
     // condition panel, course map) at the screen edges instead of 4:3 centred.
     void set_hud_edges(bool on) {
@@ -57,14 +57,17 @@ public:
         hud_edges_ = on;
         if (!on && hud_on_) { hud_on_ = false; set_raster_hud_moves(); render_done_ = false; }
     }
+    int output_width() const { return width(); }
+    int output_height() const { return OutputH; }
+    void set_psp_stretch(bool stretch);
     // Vita GPU-fast path: keep the exact CPU tile layers, but let the host
     // draw the 3D polygons. The normal desktop/CPU path remains the default.
     void set_external_3d(bool enabled) {
 #ifdef M2_LOW_MEMORY
         // CPU-only constrained frontends do not need two full GPU layers.
         if (enabled) {
-            background_gpu_.resize(size_t(W) * H);
-            foreground_gpu_.resize(size_t(W) * H);
+            background_gpu_.resize(size_t(OutputW) * OutputH);
+            foreground_gpu_.resize(size_t(OutputW) * OutputH);
         }
 #endif
         external_3d_ = enabled; render_done_ = false;
@@ -103,14 +106,37 @@ public:
     uint64_t screen_hash() const;
     const Raster &raster() const { return raster_; }
     bool rendered_now() const { return rendered_now_; } // the last update drew the 3D layer afresh
-    uint64_t raster_hash() const { return raster_.hash(0, 495, 0, 383); }
+    uint64_t raster_hash() const {
+#ifdef M2_PSP_NATIVE_VIDEO
+        return raster_.hash(0, OutputW - 1, 0, OutputH - 1);
+#else
+        return raster_.hash(0, 495, 0, 383);
+#endif
+    }
 
     using ProfileClock = uint64_t (*)();
     void set_profile_clock(ProfileClock clock) { profile_clock_ = clock; }
     const VideoProfile &last_profile() const { return profile_; }
     static constexpr int W = 496, H = 384;
+#ifdef M2_PSP_NATIVE_VIDEO
+    static constexpr int OutputW = 480, OutputH = 272;
+#else
+    static constexpr int OutputW = W, OutputH = H;
+#endif
 
 private:
+#ifdef M2_PSP_NATIVE_VIDEO
+    // Sample logical tile pixels directly at native output pixel centers.
+    int output_x_boundary(int logical) const;
+    static int output_y_boundary(int logical);
+    int psp_left_ = 58, psp_width_ = 363;
+    bool psp_mapping_valid_ = false;
+    std::array<uint16_t, OutputW> psp_source_x_{};
+    std::array<uint16_t, OutputH> psp_source_y_{};
+    std::array<uint16_t, OutputW> psp_window_bit_{};
+    std::array<uint16_t, 5> psp_mask_boundaries_{};
+
+#endif
     uint16_t tile(uint32_t i) const { return uint16_t(tile_ram_[i * 2] | tile_ram_[i * 2 + 1] << 8); }
     void build_layer(int layer); // pixmap_/flags_ for one tilemap
     void draw(std::vector<uint32_t> &bitmap, int layer, int flags);

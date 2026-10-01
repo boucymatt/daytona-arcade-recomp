@@ -87,7 +87,7 @@ public:
     const FrameProfile &last_profile() const { return profiler_.frame; }
 
     const std::vector<uint32_t> &screen() const { return board_->video().screen(); } // screen_width() x 384, 0xAARRGGBB
-    static constexpr int kWidth = Video::W, kHeight = Video::H; // the original screen
+    static constexpr int kWidth = Video::OutputW, kHeight = Video::OutputH; // the original screen
     int screen_width() const { return board_->video().width(); }
     // Widescreen (enhancement): the screen widened to `aspect` (width / height,
     // square pixels as displayed) by showing more of the scene at the sides;

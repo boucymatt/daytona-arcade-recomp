@@ -36,6 +36,14 @@ struct VideoMem {
 class Raster {
 public:
     Raster();
+#ifdef M2_PSP_NATIVE_VIDEO
+    static constexpr int kStride = 480, kHeight = 272;
+#else
+    static constexpr int kStride = 512, kHeight = 512;
+#endif
+    // PSP-only output policy; guest projection, viewport and game state stay
+    // in original 496x384 coordinates. Other builds retain their native path.
+    void set_psp_stretch(bool stretch);
 
     // MAME render_polygons: clear, then draw windows from the last down to
     // 0, each in z-bucket order (low to high z; newest first within a
@@ -71,9 +79,15 @@ public:
     struct Extra; // per-polygon shading state (MAME m2_poly_extra_data)
 
 private:
-    int stride_ = 512, margin_ = 0;
+    int stride_ = kStride, margin_ = 0;
     HudMove hud_moves_[3];
     int hud_moves_count_ = 0;
+#ifdef M2_PSP_NATIVE_VIDEO
+    bool psp_stretch_ = false;
+    std::array<uint16_t, kStride> checker_x_{};
+    std::array<uint16_t, kHeight> checker_y_{};
+    bool checker_pixel(int x, int y) const { return ((checker_x_[size_t(x)] ^ checker_y_[size_t(y)]) & 1) != 0; }
+#endif
     std::vector<uint32_t> dest_;
     std::vector<uint8_t> fill_;
     uint8_t gamma_[256];

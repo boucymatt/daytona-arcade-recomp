@@ -108,7 +108,10 @@ struct Raster::Extra {
 #endif
 };
 
-Raster::Raster() : dest_(512 * 512), fill_(512 * 512) {
+Raster::Raster() : dest_(size_t(kStride) * kHeight), fill_(size_t(kStride) * kHeight) {
+#ifdef M2_PSP_NATIVE_VIDEO
+    set_psp_stretch(false);
+#endif
     // MAME video_start
     for (int i = 0; i < 256; i++) {
         double raw_value = std::max((double(i) - 64.0) * 255.0 / 191.0, 0.0);
@@ -117,6 +120,10 @@ Raster::Raster() : dest_(512 * 512), fill_(512 * 512) {
 }
 
 void Raster::set_wide_margin(int margin) {
+ #ifdef M2_PSP_NATIVE_VIDEO
+    (void)margin;
+    return;
+ #else
     margin_ = std::max(margin, 0);
     const int stride = std::max(512, 496 + 2 * margin_);
     if (stride != stride_) {
@@ -124,6 +131,21 @@ void Raster::set_wide_margin(int margin) {
         dest_.assign(size_t(stride_) * 512, 0u);
         fill_.assign(size_t(stride_) * 512, u8(0));
     }
+ #endif
+}
+
+void Raster::set_psp_stretch(bool stretch) {
+#ifdef M2_PSP_NATIVE_VIDEO
+    psp_stretch_ = stretch;
+    const int width = stretch ? 480 : 363;
+    const int left = stretch ? 0 : 58;
+    for (int x = 0; x < kStride; ++x)
+        checker_x_[size_t(x)] = uint16_t(std::clamp(((x - left) * 2 + 1) * 496 / (width * 2), 0, 495));
+    for (int y = 0; y < kHeight; ++y)
+        checker_y_[size_t(y)] = uint16_t((y * 2 + 1) * 384 / (kHeight * 2));
+#else
+    (void)stretch;
+#endif
 }
 
 uint64_t Raster::hash(int minx, int maxx, int miny, int maxy) const {
@@ -201,6 +223,34 @@ void Raster::render_one(GeoPoly poly, int crtc_x, int crtc_y, int render_x, int 
                    std::min(poly.viewport[2] + wide + render_x, clip_maxx),
                    std::max((384 - poly.viewport[3]) + render_y, clip_miny),
                    std::min((384 - poly.viewport[1]) + render_y, clip_maxy)};
+
+#ifdef M2_PSP_NATIVE_VIDEO
+    // Convert the guest clip's pixel-cell bounds before rasterization. Native
+    // pixel centers must lie in [scaled(min), scaled(max+1)); round_coordinate
+    // is ceil(value-0.5), including exact half-pixel ties. Viewports remain
+    // guest coordinates, never clamped against the smaller output too early.
+    clip[0] = std::max(clip[0], 0); clip[1] = std::min(clip[1], 495);
+    clip[2] = std::max(clip[2], 0); clip[3] = std::min(clip[3], 383);
+    if (clip[0] > clip[1] || clip[2] > clip[3]) return;
+    const float scale_x = float(psp_stretch_ ? 480 : 363) / 496.0f;
+    constexpr float scale_y = 272.0f / 384.0f;
+    const float left = psp_stretch_ ? 0.0f : 58.0f;
+    const auto boundary = [](int coordinate, int output_extent, int guest_extent) {
+        // Exact ceil(coordinate*output_extent/guest_extent - 0.5), without
+        // floating-point noise changing an exact half-pixel clip tie.
+        return (2 * coordinate * output_extent + guest_extent - 1) / (2 * guest_extent);
+    };
+    const int width = psp_stretch_ ? 480 : 363, origin = psp_stretch_ ? 0 : 58;
+    clip[0] = std::clamp(origin + boundary(clip[0], width, 496), 0, kStride - 1);
+    clip[1] = std::clamp(origin + boundary(clip[1] + 1, width, 496) - 1, 0, kStride - 1);
+    clip[2] = std::clamp(boundary(clip[2], 272, 384), 0, kHeight - 1);
+    clip[3] = std::clamp(boundary(clip[3] + 1, 272, 384) - 1, 0, kHeight - 1);
+    if (clip[0] > clip[1] || clip[2] > clip[3]) return;
+    for (int i = 0; i < poly.num_vertices; ++i) {
+        poly.v[i].x = left + poly.v[i].x * scale_x;
+        poly.v[i].y *= scale_y;
+    }
+#endif
 
     extra.checker = (poly.texheader[0] >> 15) & 1;
     extra.lumabase = u32(poly.texheader[1] & 0xff) << 7;
@@ -442,10 +492,15 @@ void Raster::draw_scanline_solid(int32_t y, int32_t x0, int32_t x1, const float 
     const u32 tb = gamma_[le16(mem_->colorxlat, 0x8000 / 2 + (((color >> 10) & 0x1f) << 8) + luma) & 0xff];
     const u32 c = rgb(tr, tg, tb);
     int x = x0;
+#ifdef M2_PSP_NATIVE_VIDEO
+    for (; x < x1; ++x)
+        if ((!o.checker || checker_pixel(x, y)) && fill[x] == 0) p[x] = c, fill[x] = 0xff;
+#else
     const int dx = o.checker ? 2 : 1;
     if (o.checker && !((x ^ y) & 1)) x++;
     for (; x < x1; x += dx)
         if (fill[x] == 0) p[x] = c, fill[x] = 0xff;
+#endif
 }
 
 template <bool Translucent>
@@ -561,6 +616,7 @@ void Raster::draw_tex_span(int32_t y, int32_t x0, int32_t x1, const float *start
 
     int x = x0;
     int dx = 1;
+#ifndef M2_PSP_NATIVE_VIDEO
     if (o.checker) {
         if (!((x ^ y) & 1)) {
             x++;
@@ -573,7 +629,11 @@ void Raster::draw_tex_span(int32_t y, int32_t x0, int32_t x1, const float *start
         duoz *= 2.0F;
         dvoz *= 2.0F;
     }
+#endif
     for (; x < x1; x += dx, ooz += dooz, uoz += duoz, voz += dvoz) {
+#ifdef M2_PSP_NATIVE_VIDEO
+        if (o.checker && !checker_pixel(x, y)) continue;
+#endif
         if (fill[x] > 0) continue;
         float const z = 1.0F / ooz;
         s32 const mml = -o.texlod + fast_log2(z);

@@ -82,8 +82,15 @@ The recompiler runs at build time on the user's machine, so no generated Sega co
 
 **PSP-1000 frontend (experimental).** The host still statically recompiles the
 same game/TGP code; PSPDEV cross-compiles it to Allegrex. Public PSPSDK APIs
-replace SDL only at the platform boundary. The reference CPU renderer draws
-496x384 and GU presents an RGB565 framebuffer; there is no second shader path.
+replace SDL only at the platform boundary. The PSP-only M2_PSP_NATIVE_VIDEO
+variant rasterizes and composes directly into a 480x272 CPU target, then GU
+presents RGB565 pixels 1:1. It does not draw a 496x384 screen and resize it.
+Game-side coordinates remain 496x384: final polygon positions/clips and tile/HUD
+sampling map those coordinates to the PSP target. The 4:3 mode uses a centered
+363x272 content area; stretch uses all 480x272. Both allocate a native-size
+canvas. Original texture/sprite-sheet layouts, depth/UV/material calculations,
+game instructions and board timing remain unchanged. The default desktop/Vita
+reference renderer is unchanged, and there is no second shader path.
 The dedicated native audio thread is the only PSP sound backend and never runs
 the reference sound board. The frame-loop paragraph above describes reference
 sound; native audio advances independently at the device clock.
@@ -96,10 +103,13 @@ allocation of unused external-GPU layer buffers; desktop and Vita defaults
 remain dense. SD/Memory Stick caching is not expanded physical RAM or firmware
 swap. I/O errors fail visibly instead of supplying dummy ROM data.
 
-Host tests compare resident/paged ROM reads, 6,000 race frames of geometry and
-board state, and 240 CPU-rendered attract frames pixel for pixel. These checks
+The original-resolution host tests compare resident/paged ROM reads, 6,000
+race frames of geometry and board state, and 240 CPU-rendered attract frames
+pixel for pixel. Native-size images necessarily differ from the original MAME
+framebuffer; tests must compare guest state separately and check mapped tile/HUD
+samples, polygon coverage, perspective/texture behavior and output bounds. These checks
 do not establish PSP hardware speed, full-race framebuffer/MAME parity on PSP,
-or audio perceptual parity. The exact CPU rasterizer and random storage reads
+or audio perceptual parity. The CPU rasterizer and random storage reads
 are known performance risks; presentation skipping must not omit game frames,
 geometry updates, audio commands or CPU raster work. See platform/psp/README.md
 for build and hardware-validation requirements.

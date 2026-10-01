@@ -30,7 +30,10 @@ PSP_HEAP_THRESHOLD_SIZE_KB(1024);
 namespace {
 std::atomic<uint32_t> running{1};
 alignas(64) unsigned int display_list[4096];
-constexpr unsigned kStride = 512, kDisplayBytes = kStride * 272 * 2;
+constexpr unsigned kWidth = 480, kHeight = 272;
+constexpr unsigned kStride = 512, kDisplayBytes = kStride * kHeight * 2;
+static_assert(rt::Video::OutputW == int(kWidth) && rt::Video::OutputH == int(kHeight),
+              "PSP must be built with native-resolution video enabled");
 constexpr unsigned kTextureOffset = 2 * kDisplayBytes, kTextureBytes = 512 * 512 * 2;
 static_assert(kTextureOffset + kTextureBytes <= 2 * 1024 * 1024);
 static_assert(uint32_t(psp::Cross) == PSP_CTRL_CROSS && uint32_t(psp::Select) == PSP_CTRL_SELECT && uint32_t(psp::R) == PSP_CTRL_RTRIGGER);
@@ -73,31 +76,32 @@ public:
         pspDebugScreenSetXY(0, 1);
     }
     void present_text() { swap(); }
-    void present(const std::vector<uint32_t>& screen, bool stretch) {
-        if (screen.size() != 496u * 384u) throw std::runtime_error("Invalid CPU framebuffer size");
+    void present(const std::vector<uint32_t>& screen) {
+        if (screen.size() != size_t(kWidth) * kHeight) throw std::runtime_error("Invalid CPU framebuffer size");
         // The prior draw is complete before this sole texture is modified.
         sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
         auto* pixels = reinterpret_cast<uint16_t*>(uncached_ + kTextureOffset);
-        for (unsigned y = 0; y < 384; ++y) {
-            auto* row = pixels + y * 512;
-            for (unsigned x = 0; x < 496; ++x) row[x] = psp::argb_to_565(screen[y * 496 + x]);
-            std::fill(row + 496, row + 512, row[495]);
+        for (unsigned y = 0; y < kHeight; ++y) {
+            auto* row = pixels + y * kStride;
+            for (unsigned x = 0; x < kWidth; ++x) row[x] = psp::argb_to_565(screen[y * kWidth + x]);
+            std::fill(row + kWidth, row + kStride, row[kWidth - 1]);
         }
-        std::memcpy(pixels + 384 * 512, pixels + 383 * 512, 512 * sizeof(uint16_t));
+        std::memcpy(pixels + kHeight * kStride, pixels + (kHeight - 1) * kStride, kStride * sizeof(uint16_t));
         sceGuStart(GU_DIRECT, display_list);
         sceGuClearColor(0xff000000); sceGuClear(GU_COLOR_BUFFER_BIT);
         sceGuEnable(GU_TEXTURE_2D); sceGuTexMode(GU_PSM_5650, 0, 0, 0);
         sceGuTexImage(0, 512, 512, 512, vram_ + kTextureOffset);
         sceGuTexFlush(); sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
-        sceGuTexFilter(GU_LINEAR, GU_LINEAR); sceGuTexWrap(GU_CLAMP, GU_CLAMP);
-        const auto rect = psp::viewport(stretch);
+        // The CPU target already includes the selected aspect/letterbox. Map it
+        // 1:1 to the physical LCD, with no second downscale or upscaling.
+        sceGuTexFilter(GU_NEAREST, GU_NEAREST); sceGuTexWrap(GU_CLAMP, GU_CLAMP);
         struct Vertex { float u, v, x, y, z; };
         // Narrow strips fit the GE texture cache and retain the same mapping.
-        for (unsigned left = 0; left < 496; left += 32) {
-            const unsigned right = std::min(left + 32, 496u);
+        for (unsigned left = 0; left < kWidth; left += 32) {
+            const unsigned right = std::min(left + 32, kWidth);
             auto* vertices = static_cast<Vertex*>(sceGuGetMemory(2 * sizeof(Vertex)));
-            vertices[0] = {float(left), 0, rect.x + float(left) * rect.width / 496.f, 0, 0};
-            vertices[1] = {float(right), 384, rect.x + float(right) * rect.width / 496.f, 272, 0};
+            vertices[0] = {float(left), 0, float(left), 0, 0};
+            vertices[1] = {float(right), float(kHeight), float(right), float(kHeight), 0};
             sceGuDrawArray(GU_SPRITES, GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_2D, 2, nullptr, vertices);
         }
         sceGuDisable(GU_TEXTURE_2D); finish(); swap();
@@ -207,6 +211,9 @@ void report_smoke(const char* result, rt::GameLoop* game, const Audio& audio, ui
                      (unsigned long)sceKernelTotalFreeMemSize(), (unsigned long)stats.blocks,
                      (unsigned long)stats.failed, (unsigned long)stats.system_error,
                      (unsigned long)stats.invalid, (unsigned long)stats.unsupported);
+        std::fprintf(file, "render_width=%u\nrender_height=%u\ncpu_mhz=%d\nbus_mhz=%d\nvram_bytes=%u\n",
+            kWidth, kHeight, scePowerGetCpuClockFrequencyInt(), scePowerGetBusClockFrequencyInt(),
+            kTextureOffset + kTextureBytes);
         std::fprintf(file, "audio_render_us=%lu\naudio_peak_render_us=%lu\naudio_late_blocks=%lu\n",
             (unsigned long)stats.render_us, (unsigned long)stats.peak_render_us, (unsigned long)stats.late_blocks);
         std::fclose(file);
@@ -241,7 +248,10 @@ int main() {
     uint64_t deadline = boot_time;
     uint32_t board_us = 0, present_us = 0;
     constexpr uint64_t frame_us = 17384; // 656 * 424 / 16 MHz, rounded for host pacing only.
-    auto apply_settings = [&] { audio.volume(unsigned(settings.volume)); audio.mute(settings.mute != 0); };
+    auto apply_settings = [&] {
+        audio.volume(unsigned(settings.volume)); audio.mute(settings.mute != 0);
+        if (game) game->board().video().set_psp_stretch(settings.stretch != 0);
+    };
     auto load_game = [&] {
         audio.close();
         if (!smoke && !save_cabinet(game.get())) throw std::runtime_error("Cabinet save failed before reset");
@@ -250,6 +260,10 @@ int main() {
         auto loaded = psp::load_game("roms");
         stage(display, "Creating native main board and CPU renderer");
         game = std::make_unique<rt::GameLoop>(std::move(loaded.images), false);
+        if (smoke) {
+            game->set_profile_clock(now_us);
+            game->board().video().set_profile_clock(now_us);
+        }
         if (!smoke) {
             load_nv("ioboard_eeprom.bin", game->board().io().eeprom);
             load_nv("backup_ram.bin", game->board().backup_ram());
@@ -257,7 +271,7 @@ int main() {
         if (!audio.open(std::move(loaded.audio))) throw std::runtime_error("Native audio engine missing");
         apply_settings(); stage(display, "Starting dedicated 48 kHz audio thread");
         if (!audio.resume()) throw std::runtime_error("PSP SRC audio/thread startup failed");
-        stage(display, "Ready: CPU framebuffer + GU presentation");
+        stage(display, "Ready: native 480x272 framebuffer + GU");
         controls.latch(held); deadline = now_us(); menu = false;
     };
     while (running.load()) {
@@ -297,7 +311,7 @@ int main() {
                 }
                 if (!menu) continue;
                 display.text_screen();
-                pspDebugScreenPrintf("  DAYTONA RECOMP - PSP-1000\n  CPU renderer / native audio (experimental)\n\n");
+                pspDebugScreenPrintf("  DAYTONA RECOMP - PSP-1000\n  480x272 CPU renderer / native audio\n\n");
                 const char* entries[] = {game ? "Resume" : "Start", "Volume", "Mute", "Aspect", "Display skip", "Reset game", "Save options", "Quit"};
                 for (int i = 0; i < 8; ++i) {
                     pspDebugScreenPrintf("  %c %-16s", selection == i ? '>' : ' ', entries[i]);
@@ -333,7 +347,7 @@ int main() {
             present_us = 0;
             if ((game->frames() - 1) % unsigned(settings.display_skip + 1) == 0 || (smoke && game->frames() == smoke)) {
                 const auto present_begin = smoke ? now_us() : 0;
-                display.present(game->screen(), settings.stretch != 0);
+                display.present(game->screen());
                 if (smoke) present_us = uint32_t(now_us() - present_begin);
             }
             deadline += frame_us;
@@ -349,6 +363,10 @@ int main() {
                         (unsigned long)board_us, (unsigned long)present_us, (unsigned long)s.blocks,
                         (unsigned long)s.render_us, (unsigned long)s.peak_render_us, (unsigned long)s.late_blocks,
                         (unsigned long)s.voices, (unsigned long)mallinfo().uordblks, (unsigned long)mallinfo().fordblks);
+                    const auto& v = game->board().video().last_profile();
+                    std::fprintf(progress, "tile_build_us=%llu tile_draw_us=%llu raster_us=%llu composite_us=%llu\n",
+                        (unsigned long long)v.tile_cache, (unsigned long long)v.tile_draw,
+                        (unsigned long long)v.raster, (unsigned long long)v.composite);
                     std::fclose(progress);
                 }
                 std::printf("PSP smoke_progress=%llu\n", (unsigned long long)game->frames()); std::fflush(stdout);
