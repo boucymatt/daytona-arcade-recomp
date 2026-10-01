@@ -1,5 +1,52 @@
 # Handoff
 
+## Vita GXM presentation options and cabinet binds (2026-10-01)
+
+Switched to psvita-native-frontend and fast-forwarded to origin/bc02bb0 first.
+No PSP files or commits were brought across; main and PSP branches untouched.
+Upstream already contained desktop widescreen, per-item race-HUD gating and
+draw-distance hooks, but the GXM frontend had none of their options connected.
+
+Added persistent Aspect0..3, HUD edges and Draw Distance-2..2 settings, live
+application on resume, scrolling16-row options and unchanged defaults.
+Original GXM System24 fast path remains. Wide modes use shared CPU tile/HUD
+composition, widened geometry clip planes and matching GXM projection/clip/HUD
+offsets. Layer textures reserve896x384 for up to21:9;12MiB layer arena raises
+totalGPU reservation30->32MiB. Wider/further options may cost FPS; no physical
+performance claim.21:9 fits with vertical letterboxing.
+
+Select+Triangle maps Test and Select+Square Service, consuming coin/view inputs.
+Plain Select coin now triggers on release so staggered chords do not insert
+coins. Menu latch suppresses a coin on resume; Start+Select remains frontend menu.
+Controls regression covers both chords, staggered press and release.
+
+Found existing generated C++ lacked hook_draw_list. Regenerated privately into
+build/vita-enhancements-input/gen with seeds/daytona93_hooks.txt; onlychunk012
+differs. Vita build links enhance.cpp and uses that generated tree. No generated
+game code/assets are committed.
+
+Validation complete: full host build,20CTest passes (2optional Lua skipped),
+11build-helper tests and final GPU lifetime/layout/HUD ASan/UBSan pass.
+Default and Furthest6000frame host16:9/HUD-edge replays complete:
+default196665345i960 instructions, hash9047513777edfaae; furthest202533889,
+hashc45f82273dcf08c6. Both223429779TGP instructions and3636sound-command bytes.
+These are host replay results, not Vita speed or physical visual validation.
+
+The first cross-build used old hookless generated code and was discarded.
+An interrupted retry initially overlapped; both owned build trees' processes
+were stopped, then a single build was resumed and completed. A host replay
+link first missed the ymfm include path; corrected before the recorded runs.
+The build helper now rejects GPU packages with a missing generated hook.
+
+VPK: build/vita-enhancements/daytona_vita.vpk, archive integrity verified.
+SHA256:95523616c6226f77293c8f71122f483aa1bbb9bc9973cc2e017483d9ba14da42.
+ELF contains hook_draw_list and shared hud_polygon_offset; frontend objects
+are newer than the final settings/control/source edits. Logging remains off.
+Evidence: build/vita-enhancements-{package,final-tests,asan-final,
+race-default,race-furthest}.log. Physical Vita testing remains required,
+especially FPS at higher scenery levels and HUD appearance.
+Changes are local on psvita-native-frontend; no push to main or PSP.
+
 ## Current state
 
 **Draw distance (enhancement, off by default).** Launcher slider (Shortest,

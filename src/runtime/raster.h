@@ -67,6 +67,7 @@ public:
     // about 77x82 pixels at x 385..462, y 67..149 (496-wide coordinates).
     // Without it nothing is moved: car close-ups, attract and ranking screens
     // put near polygons and 2D text in the HUD's areas too.
+    int hud_polygon_offset(const GeoPoly& projected) const;
     bool race_hud_visible(const std::vector<GeoPoly> &polys, int crtc_x, int crtc_y) const;
     void set_hud_moves(const HudMove *moves, int count) {
         hud_moves_count_ = std::min(count, 3);

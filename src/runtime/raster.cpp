@@ -181,6 +181,24 @@ bool Raster::race_hud_visible(const std::vector<GeoPoly> &polys, int crtc_x, int
     return false;
 }
 
+int Raster::hud_polygon_offset(const GeoPoly& poly) const {
+    if (poly.num_vertices && hud_moves_count_ && poly.z <= kHudOverlayZ) {
+        float x0 = poly.v[0].x, x1 = x0, y0 = poly.v[0].y, y1 = y0;
+        for (int i = 1; i < poly.num_vertices; i++) {
+            x0 = std::min(x0, poly.v[i].x), x1 = std::max(x1, poly.v[i].x);
+            y0 = std::min(y0, poly.v[i].y), y1 = std::max(y1, poly.v[i].y);
+        }
+        const float sx = float(margin_); // projected x includes the margin
+        for (int m = 0; m < hud_moves_count_; m++) {
+            const HudMove &M = hud_moves_[m];
+            if (M.dx && x0 - sx >= M.x0 && x1 - sx <= M.x1 && y0 >= M.y0 && y1 <= M.y1) {
+                return M.dx;
+            }
+        }
+    }
+    return 0;
+}
+
 void Raster::render_one(GeoPoly poly, int crtc_x, int crtc_y, int render_x, int render_y, int clip_minx, int clip_maxx,
                         int clip_miny, int clip_maxy) {
     // Widescreen: a viewport spanning the screen extends into the side margins.
@@ -192,23 +210,9 @@ void Raster::render_one(GeoPoly poly, int crtc_x, int crtc_y, int render_x, int 
         v.y = float((384 - poly.center[1]) + crtc_y) - (v.y / (v.p[0] + std::numeric_limits<float>::min()));
     }
 
-    // Widescreen, HUD at the edges: an overlay polygon inside a moved group moves with it.
-    if (hud_moves_count_ && poly.z <= kHudOverlayZ) {
-        float x0 = poly.v[0].x, x1 = x0, y0 = poly.v[0].y, y1 = y0;
-        for (int i = 1; i < poly.num_vertices; i++) {
-            x0 = std::min(x0, poly.v[i].x), x1 = std::max(x1, poly.v[i].x);
-            y0 = std::min(y0, poly.v[i].y), y1 = std::max(y1, poly.v[i].y);
-        }
-        const float sx = float(margin_); // projected x includes the margin
-        for (int m = 0; m < hud_moves_count_; m++) {
-            const HudMove &M = hud_moves_[m];
-            if (M.dx && x0 - sx >= M.x0 && x1 - sx <= M.x1 && y0 >= M.y0 && y1 <= M.y1) {
-                for (int i = 0; i < poly.num_vertices; i++) poly.v[i].x += float(M.dx);
-                render_x += M.dx;
-                break;
-            }
-        }
-    }
+    const int hud_dx = hud_polygon_offset(poly);
+    for (int i = 0; i < poly.num_vertices; ++i) poly.v[i].x += float(hud_dx);
+    render_x += hud_dx;
     // model2_3d_render
     Extra extra;
     const int renderer = (poly.texheader[0] >> 13) & 3;
