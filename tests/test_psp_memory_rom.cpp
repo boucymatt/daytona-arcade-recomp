@@ -181,9 +181,22 @@ int main(int argc, char **argv) {
                 dense.board().video().set_external_3d(!render);
                 paged.board().video().set_external_3d(!render);
             }
+            if (std::getenv("PSP_INSPECT_POLYGON"))
+                paged.board().video().set_render_observer(frame == 210 ?
+                    +[](void*, const char*, size_t, size_t) {} : nullptr, nullptr);
             const auto input = input_for(frame, mode == "attract");
             dense.run_frame(input);
             paged.run_frame(input);
+            if (frame == 210 && std::getenv("PSP_INSPECT_POLYGON")) {
+                const auto& p = paged.board().video().gpu_polys().at(215);
+                std::printf("polygon215 vertices=%u lod=%d center=%d,%d headers=%04x,%04x,%04x,%04x\n",
+                    unsigned(p.num_vertices), int(p.texlod), p.center[0], p.center[1],
+                    p.texheader[0], p.texheader[1], p.texheader[2], p.texheader[3]);
+                for (unsigned i = 0; i < p.num_vertices; ++i)
+                    std::printf("vertex%u x=%a y=%a z=%a u=%a v=%a\n", i,
+                        double(p.v[i].x), double(p.v[i].y), double(p.v[i].p[0]),
+                        double(p.v[i].p[1]), double(p.v[i].p[2]));
+            }
             require(dense.instructions() == paged.instructions() && dense.frames() == paged.frames() &&
                     dense.interrupts() == paged.interrupts(), "game execution", frame);
             require(dense.board().tgp().tgp_instructions() == paged.board().tgp().tgp_instructions(), "TGP execution", frame);

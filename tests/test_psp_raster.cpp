@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cfenv>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -170,6 +171,15 @@ int main() {
         try { draw(raster, memory, {bad}); } catch (const rt::GeoFatal&) { caught = true; }
         require(caught, "invalid vertex count rejected before indexing");
     }
+    for (bool texture : {false, true}) {
+        const auto collapsed = polygon({{248, 0}, {248, 100}, {248, 384}, {248, 200}}, texture);
+        std::feclearexcept(FE_ALL_EXCEPT);
+        draw(raster, memory, {collapsed});
+        require((std::fetestexcept(FE_DIVBYZERO | FE_INVALID) == 0),
+                "empty polygon spans must not divide by zero or produce invalid interpolation");
+        require(std::all_of(raster.pixels(), raster.pixels() + 480 * 272,
+                [](uint32_t p) { return p == 0; }), "collapsed quad draws no pixels");
+    }
     std::vector<std::string> events;
     raster.set_render_observer([](void* context, const char* name, size_t, size_t) {
         static_cast<std::vector<std::string>*>(context)->emplace_back(name);
@@ -177,6 +187,20 @@ int main() {
     draw(raster, memory, {full()});
     require(events == std::vector<std::string>{"raster_clear_begin", "raster_order_begin",
         "raster_sort_begin", "raster_draw_begin", "raster_batch", "raster_end"}, "raster trace order");
+    raster.set_render_observer(nullptr, nullptr);
+    struct Detail { size_t count = 0; } detail;
+    std::vector<rt::GeoPoly> batch(1025, polygon({{0, 0}, {4, 0}, {4, 4}, {0, 4}}));
+    draw(raster, memory, batch);
+    const auto expected = raster.hash(0, 479, 0, 271);
+    raster.set_render_observer([](void* context, const char* name, size_t ordinal, size_t index) {
+        if (std::string(name).rfind("poly_", 0) != 0) return;
+        require(ordinal >= 896 && ordinal < 1024, "polygon detail bounded to failing batch");
+        require(index == 1024 - ordinal, "trace reports sorted source index");
+        static_cast<Detail*>(context)->count++;
+    }, &detail);
+    draw(raster, memory, batch);
+    require(detail.count == 128 * 5, "five boundaries for each selected polygon");
+    require(raster.hash(0, 479, 0, 271) == expected, "trace preserves pixels");
     raster.set_render_observer(nullptr, nullptr);
     std::puts("PSP raster: native480x272, aspect/stretch, guest clipping, checker phase, triangles/quads and perspective textures passed");
 }

@@ -202,8 +202,14 @@ void Raster::render(const std::vector<GeoPoly> &polys, int windows, const VideoM
     for (size_t ordinal = 0; ordinal < order.size(); ++ordinal) {
         if (observer_ && ordinal % 128 == 0) trace("raster_batch", ordinal, polys.size());
         const size_t i = order[ordinal];
+        trace_polygon_ = observer_ && ordinal >= 896 && ordinal < 1024;
+        trace_ordinal_ = ordinal;
+        trace_index_ = i;
+        trace_polygon("poly_begin");
         if (polys[i].window <= windows) render_one(polys[i], crtc_x, crtc_y, render_x, render_y, clip_minx, clip_maxx, clip_miny, clip_maxy);
+        trace_polygon("poly_end");
     }
+    trace_polygon_ = false;
     trace("raster_end", order.size(), polys.size());
 }
 
@@ -282,6 +288,7 @@ void Raster::render_one(GeoPoly poly, int crtc_x, int crtc_y, int render_x, int 
     // Widescreen: a viewport spanning the screen extends into the side margins.
     const int wide = margin_ && poly.viewport[0] <= 0 && poly.viewport[2] >= 495 ? margin_ : 0;
     if (poly.num_vertices > std::size(poly.v)) throw GeoFatal("raster vertex count exceeds storage");
+    trace_polygon("poly_projection_begin");
     // model2_3d_project
     for (int i = 0; i < poly.num_vertices; i++) {
         GeoVertex &v = poly.v[i];
@@ -305,6 +312,7 @@ void Raster::render_one(GeoPoly poly, int crtc_x, int crtc_y, int render_x, int 
             render_x += hud_dx_;
         }
     }
+    trace_polygon("poly_material_begin");
     // model2_3d_render
     Extra extra;
     const int renderer = (poly.texheader[0] >> 13) & 3;
@@ -379,6 +387,7 @@ void Raster::render_one(GeoPoly poly, int crtc_x, int crtc_y, int render_x, int 
         }
     }
 
+    trace_polygon("poly_draw_begin");
     switch (poly.num_vertices) {
     case 3: render_triangle(clip, renderer, extra, poly.v[0], poly.v[1], poly.v[2]); break;
     case 4: render_polygon<4>(clip, renderer, extra, poly.v); break;
@@ -565,6 +574,9 @@ void Raster::render_polygon(const int *clip, int renderer, const Extra &o, const
         if (istartx > istopx) std::swap(istartx, istopx);
         istartx = std::max<int32_t>(istartx, clip[0]);
         istopx = std::min<int32_t>(istopx, clip[1] + 1);
+        // Empty spans have no pixels or persistent interpolation state. In
+        // particular, coincident edges must not evaluate 1 / (stopx-startx).
+        if (istartx >= istopx) continue;
         float start[3], dpdx[3];
         const float ldy = fully - ledge->v1->y;
         const float rdy = fully - redge->v1->y;
@@ -576,7 +588,6 @@ void Raster::render_polygon(const int *clip, int renderer, const Extra &o, const
             start[p] = lparam + (float(istartx) + 0.5f - startx) * d;
             dpdx[p] = d;
         }
-        if (istartx >= istopx) istartx = istopx = 0;
         scanline(renderer, curscan, istartx, istopx, start, dpdx, o);
     }
 }

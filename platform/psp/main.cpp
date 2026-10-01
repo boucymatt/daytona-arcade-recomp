@@ -84,8 +84,9 @@ void trace_render(void*, const char* stage, size_t progress, size_t total) {
     // Bounded detail only for the frame that failed on physical hardware.
     if (!std::strcmp(stage, "raster_batch") && progress >= 8192) return;
     char label[192];
-    std::snprintf(label, sizeof(label), "render_%s target_frame=211 progress=%lu polygons=%lu",
-                  stage, (unsigned long)progress, (unsigned long)total);
+    std::snprintf(label, sizeof(label), "render_%s target_frame=211 progress=%lu %s=%lu",
+                  stage, (unsigned long)progress, !std::strncmp(stage, "poly_", 5) ? "source_index" : "polygons",
+                  (unsigned long)total);
     checkpoint(label);
     if (diagnostic_log.error()) throw std::runtime_error("Render trace write failed");
 }
@@ -484,7 +485,7 @@ int main() {
         targeted_trace = parsed && value == 2;
         std::fclose(enabled);
     }
-    checkpoint("test10_boot_before_callbacks");
+    checkpoint("test12_boot_before_callbacks");
     int callbacks = sceKernelCreateThread("daytona_callbacks", callback_thread, 0x11, 4096, PSP_THREAD_ATTR_USER, nullptr);
     if (callbacks >= 0 && sceKernelStartThread(callbacks, 0, nullptr) < 0) {
         sceKernelDeleteThread(callbacks); callbacks = -1;

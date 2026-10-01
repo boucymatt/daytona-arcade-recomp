@@ -1,5 +1,82 @@
 # Handoff
 
+## PSP test12 empty-span reciprocal fix (2026-10-01)
+
+Physical test11 journal ends at frame211 sorted969/source215 poly_draw_begin;
+968 completed. No exception or shutdown record. Archived privately at
+build/psp-physical-test11-poly969.log.
+
+Opt-in PSP_INSPECT_POLYGON host audit reproduces frame211 using PSP_IDLE_INPUT
+and reports source215 from the user's ROMs. Local debug replay with observer
+enabled only for frame211 stops at matching sorted969. It is a textured quad.
+First scanline row169 has coincident projected edges and clipped span242..242;
+the existing code computes reciprocal infinity before noticing the empty span.
+Evidence: build/psp-test12-{inspect,debug,gdb}.txt (private geometry output).
+The GDB row breakpoint continues into later polygons; only the first row is
+the target polygon, not every subsequent line labeled target.
+
+Moved the empty-span check before interpolation in render_polygon. Empty rows
+have no persistent interpolation state and no pixels, so bypassing their
+reciprocal and shading preserves visible results. Shared CPU path benefits
+across platforms; no guest timing, clocks, texture policy or audio changes.
+Retained test11 bounded trace for one physical confirmation run.
+
+A synthetic collapsed quad regression fails before the fix with FP exception
+flags and passes afterward for solid and textured materials. ASan/UBSan raster
+test passes.6000frame native race preserves digest14c33947133a8f6c and final
+hashde73b6f16dd18f81,196665345i960/223429779TGP instructions and cache counts.
+PSP cross-build and full host build pass; CTest32passed,2optional Lua skipped.
+Original32MB emulator600frames passes with hash a5103ec1c6a9f12d,
+419fresh3D and no audio/watchdog/log errors. Target969 ends and frame211
+video completes. Private evidence build/psp-emulator/{smoke-result,
+psp-diagnostic}-test12-600.*. Emulator126.526697s is not physical speed.
+Host Ninja reports a recovering premature build-log end; a redundant rebuild
+was stopped after the completed build/tests, since it repeated all136targets.
+Build metadata warning remains separate from the hardware fault.
+Physical shutdown cause remains unconfirmed: this
+is a concrete invalid operation at matching local geometry, not a hardware
+exception dump. No evidence justifies disabling audio or changing FP policy.
+
+Private package build/psp-test12/PSP/GAME/DAYTONA, update ZIP includes only
+EBOOT,marker2,instructions. EBOOT SHA256:
+7b10ed549794c4169c739e981ef2e6a007392a867af7cea58caae1938a0e77ef.
+Next: confirm physical progress beyond211 and no poweroff, then remove costly
+targeted diagnostics before assessing smoothness. Do not keep power-cycling
+a failing build.
+
+
+## PSP test11 polygon shutdown trace (2026-10-01)
+
+Physical test10 again powered off. Last record is frame211 raster batch896 of
+1383 polygons, heap free982840B and main stack free221528B. No recorded bounds
+exception or allocation failure. This narrows last main progress to sorted
+entries896..1023, not a proven faulting polygon or thread. Test10 guards did
+not resolve the shutdown; memory exhaustion and missing lighting remain
+unproven. Concurrent audio, storage and hardware faults are not excluded.
+
+Test11 adds at most640 owner-thread checkpoints to that batch only while the
+frame211 observer is enabled, including sorted ordinal, source index and
+projection/material/draw boundaries. No clocks, cache budgets, pixels or guest
+timing equations change. Sync logging disturbs wall time and audio scheduling.
+This is diagnostic instrumentation, not a crash fix or speed improvement.
+
+Validation: full host and PSP builds pass; CTest32passed,2optional Lua skipped.
+Focused raster ASan/UBSan passes, including640 bounded records and unchanged
+pixels with tracing enabled. Native600frame idle replay retains digest
+ a15e56b78f434bd2 and final hash a5103ec1c6a9f12d,23409665i960 and12221670TGP
+instructions. Original32MB emulator600frames completed with the same final
+hash,419fresh3D,640polygon records and video_complete on frame211. No audio,
+watchdog or diagnostic error. Emulator time126.559056s is not hardware speed.
+Evidence: build/psp-test11-{idle.txt,ctest.log}, build/psp-emulator/
+{smoke-result,psp-diagnostic}-test11-600.*, and physical test10 archive
+build/psp-physical-test10-batch896.log.
+
+Private update: build/psp-test11-update.zip (EBOOT,marker2,instructions only).
+EBOOT SHA256:99978ed3ea495e2fdfaa1a00123824e72d40f50a0dacf5a644f148d19f1d1ace.
+Next: inspect one physical test11 log for the last source index and stage;
+stop repeated testing if the device shuts off. Physical fault remains unknown.
+
+
 ## PSP test10 CPU video detail and bounds guards (2026-10-01)
 
 User explicitly confirmed poweroff on the latest traced test09 run. Its1136line

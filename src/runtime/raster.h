@@ -98,6 +98,11 @@ private:
     int hud_dx_ = 0;                           // HUD overlay move (0 = none)
     float hud_box_[4] = {0, 0, 0, 0};          // the condition box: x0, x1, y0, y1 (496-wide)
     uint16_t hud_z_ = 0;
+    bool trace_polygon_ = false;
+    size_t trace_ordinal_ = 0, trace_index_ = 0;
+    void trace_polygon(const char* stage) {
+        if (trace_polygon_) trace(stage, trace_ordinal_, trace_index_);
+    }
     RenderObserver observer_ = nullptr;
     void* observer_context_ = nullptr;
     void trace(const char* stage, size_t progress, size_t total) {

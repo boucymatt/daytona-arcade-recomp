@@ -131,6 +131,19 @@ still recorded afterward. Raster guards fail visibly on oversized vertex
 counts or exhausted edge chains instead of accessing outside their storage;
 valid render equations/order remain unchanged. A last main-thread checkpoint
 does not identify a concurrent audio or hardware fault.
+Physical test10 stopped after sorted-entry batch896 in frame211. Test11 adds
+five boundaries per drawn polygon only for sorted entries896..1023: entry,
+projection, material setup, draw and exit, with original source index. Clipped
+or filtered entries can emit fewer records; at most640 additional records are
+written. Render arithmetic and order remain unchanged.
+Test11 physical progress ended at frame211 sorted969/source215 draw begin.
+Host replay of that polygon found coincident scanline edges at row169 and an
+empty pixel span242..242, yet interpolation evaluated a zero-width reciprocal.
+Test12 skips empty clipped polygon spans before interpolation and shading.
+There is no persistent per-row parameter state, so no visible samples or guest
+timing change. Synthetic collapsed-quads no longer raise divide-by-zero/invalid
+FP flags;6000 native-size race frames retain their framebuffer hashes. This
+fixes demonstrated invalid arithmetic, not yet a verified physical poweroff.
 
 Opt-in PSP performance diagnostics publish coherent completed-frame wall-time
 snapshots and per-ROM cache-miss seek/read counters. I/O observers run only on
