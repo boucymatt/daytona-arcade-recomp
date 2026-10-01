@@ -1,5 +1,80 @@
 # Handoff
 
+## PSP test08 bounded ROM I/O optimization (2026-10-01)
+
+Physical test07 feedback supersedes the earlier intentional-exit report: this
+new run crashed/powered down. Its1264line log ends at frame210 during active
+3D, without exit/shutdown/exception checkpoint. No ROM read failure or logged
+heap/stack exhaustion explains the shutdown. Cause remains UNKNOWN; do not
+claim a crash fix from the changes or emulator completion below.
+Matched22frame hardware samples182..203 show test07 board1364.3ms versus
+test06 1776.6ms; tile-cache6.0ms versus186.1ms, raster428.9ms versus603.3ms,
+geometry708.5ms versus713.8ms. Main ROM seek/read120.2/509.1ms is INCLUDED in
+its calling stages. Audio peak490.214ms,231late blocks by frame210; final
+heapused/free16715032/968680B, kernel free1159168B, main/audio/observer stack
+free221696/130012/10636B. This does not exclude unlogged hardware faults.
+
+Test08:
+- Same832KiB main cache budget: program128/main128/copro64/polygons256/
+  textures256KiB, associativity4/16/8/16/4. Audio remains two256KiB4way caches.
+  Policy is shared by PSP loader and real-ROM host audit, not duplicated.
+- Optional PagedRom policy defaults preserve non-PSP behavior. PSP enables
+  exact-position sequential reads: skip seek only after a successful complete
+  read ending at the requested offset. Cache hits do not alter file position.
+  Failed/short reads invalidate tag, last-page pointer and known position.
+- Routine one-second diagnostic records write/close but no longer force a
+  whole-device sync while main/audio ROM reads are active. Startup/stall/exit
+  keep sync. Last heartbeat may be lost on power loss; no durability promise.
+  This reduces interference but is NOT a confirmed shutdown-cause finding.
+- Native480x272, clocks333/166, guest instructions/timing, audio sample engine,
+  no-fast-math flags and desktop/Vita renderer paths unchanged.
+
+Measurements and rejected candidates:
+- Same6000frame host race, total main ROM reads1460916224->971177984bytes,
+  33.52% less. Texture misses189021->83637 (55.75% less), program576->609,
+  main79191->70582,copro275->94,polygons87606->82182. No cache growth.
+- Uniform8/16/64ways worsened texture misses to200166/202371/202114;
+  rejected. Unlike test07's invalid texture experiment, this sweep actually
+  passed the policy to all five constructors and verified output cache sizes.
+- Doubling texture cache at program's expense alone saved105384texture pages
+  for33extra program pages; total memory stayed832KiB. Per-region associativity
+  then reduced main/copro/polygon misses. Audio cache sizes were not reduced.
+
+Validation:
+- Full6000frame480x272 race old/new digest14c33947133a8f6c, finalhash
+  de73b6f16dd18f81,196665345i960/223429779TGP instructions,max2343polygons.
+- Same full replay passes ASan/UBSan on audit and layout-sensitive runtime
+  sources; generated game objects and remaining archive objects are reused
+  uninstrumented. No sanitizer finding. This is not PSP exception coverage.
+- Cache tests sweep1/2/4/8/16/64ways,4/8/12/16KiB and both seek modes:
+  endian,unaligned/image-wrap,eviction,read-only cursors,short-read recovery.
+  Focused cache ASan/UBSan passes. Diagnostic shim verifies heartbeat skips
+  sync while fault sync errors still propagate. Host/PSP builds pass;
+  CTest31passed,2optional Lua skipped.
+- Original32MB PSP emulator600frames:120.036991s vs test07 121.640348s,
+  samehash a5103ec1c6a9f12d,419fresh3D. Fast emulator storage understates
+  hardware ROM latency; do not equate33.52% fewer bytes to33.52% faster FPS.
+  Heap16977176used/706536freeB,kernel1290240freeB.10933audio blocks,
+  296late,peak64.809ms; no audio/system/log error or watchdog incident.
+- Extended original32MB emulator1200frames completes250.468922s,1019fresh3D,
+  hash869a1bc1b13620e2; no ROM/audio/system/log/watchdog failure.23133audio
+  blocks,296late,peak64.809ms. Finalheapused17501464/free1234920B after
+  later capacity growth; kernel free after audio pause1290240B. Exit reason3,
+  audio-close checkpoint recorded. Screenshot test08-extended-3d.png inspected.
+  Evidence uses the same archive names with test08-1200. This is not hardware
+  stability proof. No new kernel/firmware hooks or forced teardown were added.
+- Evidence build/psp-test08-{final-race,asan-race,ctest}.txt/log and
+  build/psp-emulator/{smoke-result,smoke-progress,psp-diagnostic}-test08-600.*.
+  Diagnostic journal appends runs; select the last test08_boot record.
+
+Private package build/psp-test08/PSP/GAME/DAYTONA, update archive
+build/psp-test08-update.zip. Update contains only EBOOT,marker,instructions;
+keep ROMs/settings/saves, back up first, and stop testing if instability recurs.
+EBOOT4608966bytes SHA256
+633dcbdd09c603492b2407f2d2ea043acde1693c6d09fe44cdc2b92c1b45c171.
+Physical crash resolution and smooth performance remain unverified.
+
+
 ## PSP test07 measured tile-cache optimization (2026-10-01)
 
 User confirmed the latest physical log's exit was requested. Do not treat its

@@ -1,3 +1,4 @@
+#include "../platform/psp/rom_cache_policy.h"
 // Opt-in real-ROM audit. Compares dense and bounded file-backed native boards
 // with the same generated code; no original code/assets are stored here.
 #include "runtime/game_loop.h"
@@ -41,11 +42,17 @@ rt::M2Board::Images images(const std::string &directory, bool paged) {
     rt::M2Board::Images result;
     result.copro_tables = load(directory + "/copro_tables.bin");
     if (paged) {
-        result.program_file = std::make_shared<rt::PagedRom>(directory + "/program.bin", 0x200000, 256 * 1024);
-        result.main_data_file = std::make_shared<rt::PagedRom>(directory + "/main_data.bin", 0x2000000, 128 * 1024);
-        result.copro_data_file = std::make_shared<rt::PagedRom>(directory + "/copro_data.bin", 0x800000, 64 * 1024);
-        result.polygons_file = std::make_shared<rt::PagedRom>(directory + "/polygons.bin", 0x1000000, 256 * 1024);
-        result.textures_file = std::make_shared<rt::PagedRom>(directory + "/textures.bin", 0x1000000, 128 * 1024);
+        size_t region = 0;
+        const auto paged_image = [&](const char* name, uint32_t size) {
+            const auto policy = psp::kRomCaches.at(region++);
+            return std::make_shared<rt::PagedRom>(directory + "/" + name + ".bin", size,
+                                                 policy.bytes, policy.ways, true);
+        };
+        result.program_file = paged_image("program", 0x200000);
+        result.main_data_file = paged_image("main_data", 0x2000000);
+        result.copro_data_file = paged_image("copro_data", 0x800000);
+        result.polygons_file = paged_image("polygons", 0x1000000);
+        result.textures_file = paged_image("textures", 0x1000000);
     } else {
         result.program = load(directory + "/program.bin");
         result.main_data = load(directory + "/main_data.bin");

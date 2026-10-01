@@ -14,7 +14,10 @@ class PagedRom {
 public:
     static constexpr uint32_t kPageBytes = 4096;
     struct Stats { uint64_t hits = 0, misses = 0, bytes_read = 0; };
-    PagedRom(const std::string &path, uint32_t logical_size, size_t cache_bytes);
+    // Optional cache policy; defaults preserve existing platform behavior.
+    // Sequential I/O skips a seek only after a verified full read ending at
+    // the exact next requested offset. This object exclusively owns its FILE.
+    PagedRom(const std::string &path, uint32_t logical_size, size_t cache_bytes, unsigned cache_ways = 4, bool sequential_io = false);
     ~PagedRom();
     PagedRom(const PagedRom &) = delete;
     PagedRom &operator=(const PagedRom &) = delete;
@@ -42,6 +45,8 @@ private:
     std::FILE *file_ = nullptr;
     std::string path_;
     uint32_t size_ = 0;
+    bool sequential_io_ = false;
+    mutable uint32_t next_read_ = UINT32_MAX;
     mutable std::vector<uint8_t> cache_;
     mutable std::vector<uint32_t> tags_, ages_;
     uint32_t sets_ = 1, set_mask_ = 0;

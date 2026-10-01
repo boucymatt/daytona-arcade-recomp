@@ -166,5 +166,13 @@ int main() {
         reset(); Log log; init(log); CHECK(!log.write(false, "a", Log::kFileLimit + 1));
         CHECK(log.error() == Log::kFileFull && io.calls.empty());
     }
+    {
+        reset(); Log log; init(log); io.sync_error = -104;
+        CHECK(log.write(false, "heartbeat", 9, false));
+        CHECK((io.calls == std::vector<std::string>{"open", "seek", "write", "close"}));
+        CHECK(log.records() == 1 && log.error() == 0 && !io.active);
+        CHECK(!log.write(true, "fault", 5)); // Faults still request sync.
+        CHECK(log.error() == -104 && io.calls.back() == "sync");
+    }
     std::puts("PSP diagnostic log tests passed");
 }
