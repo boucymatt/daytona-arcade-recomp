@@ -114,6 +114,16 @@ Main serializes checkpoint writes with observer start/join
 and publishes heap samples; the observer never inspects live game/heap state.
 Audio teardown must also retain the engine and SRC buffers if a kernel join
 fails, until the worker publishes that its final object access has completed.
+Diagnostic marker value2 additionally enables a bounded main-thread trace for
+target frames205..216. The observer is joined before entry and restarted before
+frame217: only main writes the shared journal in that window. Core, geometry,
+video and frontend boundaries request checked close/sync, recording guest PC,
+instruction count and inputs. Audio continues independently. These checkpoints
+can delay the game and audio command timing; do not use that window as an FPS
+benchmark. They identify last main-thread progress, not the faulting thread,
+and sync still cannot guarantee recovery from a physical power loss. Marker1
+retains normal periodic profiling. Neither mode skips game instructions/frames.
+
 Opt-in PSP performance diagnostics publish coherent completed-frame wall-time
 snapshots and per-ROM cache-miss seek/read counters. I/O observers run only on
 each image's owner, with atomic publication to the watchdog; no observer accesses

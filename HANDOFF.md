@@ -1,5 +1,75 @@
 # Handoff
 
+## PSP test09 bounded frame-210 shutdown trace (2026-10-01)
+
+Latest physical test08 journal is archived privately as
+build/psp-physical-test08-frame210.log (1154lines). It ends with completed
+frame210/fresh3D29, no exit/exception/shutdown record, like test07's journal.
+That means last LOGGED progress, not proof that the exact same instruction
+faulted. User reported the earlier physical poweroff and requested this
+investigation. No firmware/driver/geometry cause has been established.
+Test08 has28unique3D samples182..210: mean board1186.0ms, geometry535.1ms,
+video571.4ms, raster445.1ms, main ROM seek/read50.8/372.9ms (included in
+caller stages),76pages/frame. Audio peak373.742ms,204late blocks. No recorded
+I/O failure, heap or stack exhaustion. Main heap16715032used/968680freeB.
+Frames182..203 contain21samples, not22; do not claim exact matched-frame
+percentage against the prior22sample aggregate without matching IDs.
+
+Test09 is diagnostic, NOT a new speed or crash-fix claim:
+- Marker2 enables synced checkpoints for target frames205..216. Marker1
+  retains ordinary periodic profiling; disabled/default platforms have no
+  stage observer. Test08 caches, native480x272 and clocks remain unchanged.
+- GameLoop optional owner-thread observer reports core begin, geometry
+  begin/end, video begin/end and frame end, with target frame, guest PC and
+  instruction count. PSP adds mapped/raw input, audio-submit completion and
+  presentation completion. These are boundaries, not native exception PCs.
+- Main joins the watchdog before the window and owns all journal writes until
+  restarting it before frame217. No concurrent writers, heap inspection by
+  observer, forced worker termination or kernel hooks. Audio stays running.
+- 12frames *9checkpoints plus enter/leave =110bounded records. Input/geometry/
+  video writes request sync, deliberately adding wall-time and potentially
+  shifting audio command timing. Do not benchmark that window. An abrupt
+  power loss may still lose the final record; the last main stage does not
+  identify a concurrent audio-thread or hardware failure.
+- Resets explicitly reset the trace window. Repeated counters do not re-arm
+  an already-entered window. Ordinary fault/shutdown paths still join first.
+
+Validation:
+- Full6000frame host race with observer on paged board and absent on dense
+  board: exact old/new digest14c33947133a8f6c, finalhashde73b6f16dd18f81;
+  196665345i960/223429779TGP instructions,max2343polygons. Audit checks all
+  36000stage callbacks for order, frame number and monotonic instructions.
+- 600frame native attract replay passes ASan/UBSan on rebuilt audit/runtime
+  sources; generated game/archive objects remain uninstrumented. Hash
+  a5103ec1c6a9f12d and digesta15e56b78f434bd2 unchanged.
+- PSP cross-build and final sequential full host build pass. CTest32passed,
+  2optional Lua skipped. Trace-window test covers6000frames, repeats, skipped
+  ranges, explicit reset and large counters with assertions enabled.
+- An overlapping host build/test-target invocation caused a Ninja premature
+  log warning. Both exited successfully, then a separate sequential full build
+  and CTest were rerun successfully; do not run concurrent Ninja writers.
+- Original32MB PSP emulator with marker2:600frames,419fresh3D,121.110645s,
+  samehash a5103ec1c6a9f12d. All110targeted records present, frames205..216,
+  observer resumed before217, normal heartbeats and audio teardown follow.
+  No diagnostic/audio-system/watchdog failure.11033audio blocks,287late,
+  peak73.349ms. Finalheap16977176used/725480freeB,kernel1290240freeB.
+- Emulator smoke uses default inputs and does not load user's cabinet saves.
+  It is not an exact reproduction of physical inputs/NV state and cannot
+  establish hardware stability. Targeted input records aid that comparison.
+- Evidence build/psp-test09-{race,asan-attract}.txt and
+  build/psp-test09-ctest-final.log; emulator archives
+  build/psp-emulator/{smoke-result,psp-diagnostic}-test09-600.*.
+  Journal appends sessions: select its LAST test09_boot record.
+
+Private package build/psp-test09/PSP/GAME/DAYTONA; update archive
+build/psp-test09-update.zip contains only executable, marker2 and instructions.
+EBOOT4611014bytes SHA256
+2309f667bb2fda6d512b14d3fd956101dac3fe8e9c7b1298b653a0ade2591b76.
+Back up saves and old log, preserve ROMs/settings/saves, retain the next
+hardware journal, and stop repeated testing if poweroff recurs. Next inspect
+the last completed/entered stage, not another speculative cache/clock change.
+
+
 ## PSP test08 bounded ROM I/O optimization (2026-10-01)
 
 Physical test07 feedback supersedes the earlier intentional-exit report: this

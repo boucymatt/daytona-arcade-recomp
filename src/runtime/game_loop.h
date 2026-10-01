@@ -84,6 +84,12 @@ public:
 
     // Opt-in profiling in caller-defined host ticks; no SDL dependency here.
     void set_profile_clock(FrameProfiler::Clock clock) { profiler_.set_clock(clock); sound_profile_clock_ = clock; }
+    enum class Stage { CoreBegin, GeometryBegin, GeometryEnd, VideoBegin, VideoEnd, FrameEnd };
+    using StageObserver = void (*)(void*, Stage, uint64_t, uint32_t, uint64_t);
+    // Owner-thread diagnostics only. Never invoke game execution from observer.
+    void set_stage_observer(StageObserver observer, void* context) {
+        stage_observer_ = observer; stage_context_ = context;
+    }
     const FrameProfile &last_profile() const { return profiler_.frame; }
 
     const std::vector<uint32_t> &screen() const { return board_->video().screen(); } // screen_width() x 384, 0xAARRGGBB
@@ -111,6 +117,11 @@ public:
     int interrupts() const { return ls_->interrupts(); }
 
 private:
+    StageObserver stage_observer_ = nullptr;
+    void* stage_context_ = nullptr;
+    void stage(Stage value) {
+        if (stage_observer_) stage_observer_(stage_context_, value, frames_ + 1, cpu_->m_IP, ls_->count);
+    }
     void probe();
     FrameProfiler profiler_;
     std::unique_ptr<M2Board> board_;

@@ -80,6 +80,28 @@ reduced main-board reads in a 6,000-frame host race from 3.623 GB to 1.461 GB,
 not to zero. Those numbers include startup, omit audio ROM traffic, and are
 not hardware throughput measurements.
 
+## Test09 targeted frame-210 investigation
+
+Both physical test07 and test08 journals end with completed frame210 and no
+shutdown record. This is a useful repeatability clue, not proof of an exact
+faulting instruction or of a geometry bug. The hardware fault is unresolved.
+
+The test09 update ships `psp-diagnostics.txt` containing `2`. It records synced
+checkpoints for target frames205–216: input, core entry, geometry entry/exit,
+video entry/exit, frame completion, audio submission and presentation. Stage
+records include guest PC and instruction count. `target_frame` names the frame
+being executed; `frames` is the last frame completed by the frontend.
+
+The background logger is joined during this window, then restarted at frame217.
+Audio continues independently. A last geometry checkpoint does not prove that
+geometry caused a concurrent audio or hardware failure. These writes may slow
+the window and affect audio timing; this is not an FPS test. Power loss may
+still lose the final record despite sync. Marker `1` retains ordinary profiling.
+
+Back up saves and the old log, replace only EBOOT and the supplied marker,
+then retain the new `psp-diagnostic.log`. Do not repeatedly stress the device
+if another shutdown occurs. No crash fix is claimed.
+
 ## Test08 ROM I/O optimization and shutdown investigation
 
 Test07 hardware feedback reports an abrupt shutdown at frame 210, without a

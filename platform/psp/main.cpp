@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include "trace_window.h"
 #include <malloc.h>
 #include <memory>
 #include <new>
@@ -37,7 +38,8 @@ std::atomic<uint32_t> running{1};
 psp::FrameProgress frame_progress;
 using Phase = psp::FramePhase;
 psp::DiagnosticLog diagnostic_log;
-bool diagnostic_enabled = false;
+bool diagnostic_enabled = false, targeted_trace = false;
+psp::TraceWindow trace_window;
 std::array<psp::IoCounters, 7> rom_io;
 psp::FrameTimings frame_timings;
 std::atomic<uint32_t> exit_reason{0}; // 1=system callback, 2=menu, 3=smoke, 4=smoke fault.
@@ -77,6 +79,24 @@ void checkpoint(const char* label) {
         sceKernelGetThreadStackFreeSize(sceKernelGetThreadId()));
     if (length > 0 && size_t(length) < sizeof(text))
         diagnostic_log.write(false, text, size_t(length));
+}
+void trace_stage(void*, rt::GameLoop::Stage stage, uint64_t frame, uint32_t pc, uint64_t instructions) {
+    if (!trace_window.active()) return;
+    using S = rt::GameLoop::Stage;
+    const char* name = "unknown";
+    switch (stage) {
+    case S::CoreBegin: name = "core_begin"; break;
+    case S::GeometryBegin: name = "geometry_begin"; break;
+    case S::GeometryEnd: name = "geometry_end"; break;
+    case S::VideoBegin: name = "video_begin"; break;
+    case S::VideoEnd: name = "video_end"; break;
+    case S::FrameEnd: name = "frame_end"; break;
+    }
+    char label[160];
+    std::snprintf(label, sizeof(label), "trace_%s target_frame=%llu guest_pc=%08lx instructions=%llu",
+                  name, (unsigned long long)frame, (unsigned long)pc, (unsigned long long)instructions);
+    checkpoint(label); // Watchdog is joined throughout this bounded window.
+    if (diagnostic_log.error()) throw std::runtime_error("Targeted trace write failed");
 }
 alignas(64) unsigned int display_list[4096];
 constexpr unsigned kWidth = 480, kHeight = 272;
@@ -447,10 +467,12 @@ int main() {
     diagnostic_log.initialize(getcwd(cwd, sizeof(cwd)));
     if (FILE* enabled = std::fopen("psp-diagnostics.txt", "r")) {
         int value = 0;
-        diagnostic_enabled = std::fscanf(enabled, "%d", &value) == 1 && value == 1;
+        const bool parsed = std::fscanf(enabled, "%d", &value) == 1;
+        diagnostic_enabled = parsed && (value == 1 || value == 2);
+        targeted_trace = parsed && value == 2;
         std::fclose(enabled);
     }
-    checkpoint("test08_boot_before_callbacks");
+    checkpoint("test09_boot_before_callbacks");
     int callbacks = sceKernelCreateThread("daytona_callbacks", callback_thread, 0x11, 4096, PSP_THREAD_ATTR_USER, nullptr);
     if (callbacks >= 0 && sceKernelStartThread(callbacks, 0, nullptr) < 0) {
         sceKernelDeleteThread(callbacks); callbacks = -1;
@@ -482,7 +504,7 @@ int main() {
     int selection = 0;
     uint32_t held = 0;
     char message[192] = "Start loads your imported files from roms/.";
-    if (diagnostic_enabled) std::snprintf(message, sizeof(message), "Test08 profiling ON. Logs saved beside EBOOT.PBP.");
+    if (diagnostic_enabled) std::snprintf(message, sizeof(message), "Test09 profiling ON. Logs saved beside EBOOT.PBP.");
     if (diagnostic_log.error()) std::snprintf(message, sizeof(message), "Diagnostic path/write error: %08lx", (unsigned long)uint32_t(diagnostic_log.error()));
     const uint64_t boot_time = now_us();
     uint64_t deadline = boot_time;
@@ -499,6 +521,7 @@ int main() {
             throw std::runtime_error("Diagnostic file unavailable; gameplay not started.");
         checkpoint("before_game_load");
         frame_progress.reset_frames();
+        trace_window = {};
         frame_timings.publish({});
         watchdog.audio_thread(-1);
         audio.close();
@@ -510,6 +533,7 @@ int main() {
         auto loaded = psp::load_game("roms", diagnostic_enabled ? rom_io_event : nullptr, io_contexts);
         stage(display, "Creating native main board and CPU renderer");
         game = std::make_unique<rt::GameLoop>(std::move(loaded.images), false);
+        if (targeted_trace) game->set_stage_observer(trace_stage, nullptr);
         if (smoke || diagnostic_enabled) {
             game->set_profile_clock(now_us);
             game->board().video().set_profile_clock(now_us);
@@ -606,6 +630,25 @@ int main() {
                 inputs.steer = mapped.steer; inputs.accel = mapped.accel; inputs.brake = mapped.brake;
                 inputs.in0 = mapped.in0; inputs.in1 = mapped.in1; inputs.in2 = mapped.in2;
             }
+            if (targeted_trace) {
+                const auto action = trace_window.advance(game->frames() + 1);
+                if (action == psp::TraceWindow::Action::Enter) {
+                    watchdog.stop(); // Single writer: main now owns the journal.
+                    checkpoint("trace_window_enter");
+                } else if (action == psp::TraceWindow::Action::Leave) {
+                    checkpoint("trace_window_leave");
+                    if (!watchdog.start()) throw std::runtime_error("Trace observer restart failed");
+                }
+                if (trace_window.active()) {
+                    char label[192];
+                    std::snprintf(label, sizeof(label),
+                        "trace_input target_frame=%llu buttons=%08lx lx=%u in0=%02x in1=%02x in2=%02x steer=%u accel=%u brake=%u",
+                        (unsigned long long)(game->frames() + 1), (unsigned long)held, unsigned(raw.Lx),
+                        unsigned(inputs.in0), unsigned(inputs.in1), unsigned(inputs.in2),
+                        unsigned(inputs.steer), unsigned(inputs.accel), unsigned(inputs.brake));
+                    checkpoint(label);
+                }
+            }
             scePowerTick(0);
             const bool profiling = smoke || diagnostic_enabled;
             const auto io_before = diagnostic_enabled ? main_io_totals() : std::array<uint32_t, 3>{};
@@ -622,12 +665,14 @@ int main() {
             const auto bytes = game->board().take_sound_bytes();
             if (!audio.send(bytes.data(), bytes.size()) || audio.stats().failed)
                 throw std::runtime_error("Native audio error or command queue overflow");
+            if (trace_window.active()) checkpoint("trace_audio_submitted");
             present_us = 0;
             if ((game->frames() - 1) % unsigned(settings.display_skip + 1) == 0 || (smoke && game->frames() == smoke)) {
                 const auto present_begin = profiling ? now_us() : 0;
                 display.present(game->screen());
                 if (profiling) present_us = uint32_t(now_us() - present_begin);
             }
+            if (trace_window.active()) checkpoint("trace_present_complete");
             if (diagnostic_enabled) {
                 const auto after = main_io_totals();
                 const auto& p = game->last_profile();

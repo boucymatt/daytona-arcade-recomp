@@ -50,7 +50,9 @@ void GameLoop::probe() {
         if ((idle && ls_->count - vblank_start_ >= kProbe * 2) || ls_->count - vblank_start_ >= kVblankCap) {
             {
                 auto sample = profiler_.measure(profiler_.frame.video);
+                stage(Stage::VideoBegin);
                 board_->vblank_end();
+                stage(Stage::VideoEnd);
             }
             in_vblank_ = false;
             frame_start_ = ls_->count;
@@ -64,7 +66,9 @@ void GameLoop::probe() {
             board_->io().inputs = inputs_;
             {
                 auto sample = profiler_.measure(profiler_.frame.geometry);
+                stage(Stage::GeometryBegin);
                 board_->vblank_start();
+                stage(Stage::GeometryEnd);
             }
             in_vblank_ = true;
             vblank_start_ = ls_->count;
@@ -103,6 +107,7 @@ void GameLoop::run_frame_deferred_sound(const Inputs &inputs) {
     inputs_ = inputs;
     frame_done_ = false;
     ls_->end_count = UINT64_MAX;
+    stage(Stage::CoreBegin);
     while (!frame_done_) {
         if (!gen::has_code(cpu_->m_IP)) {
             char b[128];
@@ -111,6 +116,7 @@ void GameLoop::run_frame_deferred_sound(const Inputs &inputs) {
         }
         gen::run(*env_);
     }
+    if (stage_observer_) stage_observer_(stage_context_, Stage::FrameEnd, frames_, cpu_->m_IP, ls_->count);
     // Transfer the UART bytes on the owning thread. The sound worker never
     // touches M2Board, video, i960/TGP state, or the frame profiler.
     if (sound_) {
