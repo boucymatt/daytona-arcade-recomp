@@ -80,7 +80,23 @@ reduced main-board reads in a 6,000-frame host race from 3.623 GB to 1.461 GB,
 not to zero. Those numbers include startup, omit audio ROM traffic, and are
 not hardware throughput measurements.
 
-## Test06 performance profiling
+## Test07 tile-cache optimization
+
+The PSP CPU renderer now retains decoded tiles and rebuilds only changed tile
+entries or glyphs, using 34 KiB of extra tracking state. Palette, scroll,
+window and aspect changes still apply every frame. Untracked callers retain
+full rebuilds. PSP hot rendering, geometry and sample loops use speed-focused
+compiler optimization without fast-math; generated game code remains size-
+optimized. ROM cache sizes, native resolution and clocks are unchanged.
+`tiles_rebuilt` in diagnostic frame snapshots verifies the work avoided.
+Desktop and Vita retain their existing rendering paths.
+
+The final 600-frame original-PSP emulator run took 121.640 seconds versus
+182.702 for test06 (33.42% less time), with identical final pixels. A 6,000-
+frame host race also preserves the previous frame digest. Audio underruns
+remain; this is an improvement, not proof of smooth physical PSP gameplay.
+
+## Per-stage performance profiling
 
 The private test06 update enables the same diagnostic marker and keeps native
 480x272 rendering, normal PSP-1000 memory and the existing audio engine.

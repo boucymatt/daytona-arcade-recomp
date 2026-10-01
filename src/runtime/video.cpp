@@ -125,6 +125,12 @@ void Video::build_layer(int layer) {
         }
         previous = val;
 #endif
+#if defined(M2_PSP_NATIVE_VIDEO) && !defined(M2_VITA_RENDER_OPT)
+        auto& previous = psp_tile_values_[base + t];
+        const bool glyph_dirty = (psp_character_dirty_[code / 8] & (1u << (code & 7))) != 0;
+        if (write_tracking_ && psp_tiles_valid_ && previous == val && !glyph_dirty) continue;
+        previous = val;
+#endif
         ++profile_.tiles_rebuilt;
         system24_source_dirty_ = true;
         system24_tile_generations_[base + t] = system24_texture_generation_ + 1;
@@ -471,6 +477,13 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
     }
 #ifdef M2_VITA_RENDER_OPT
     update_tile_cache();
+#elif defined(M2_PSP_NATIVE_VIDEO)
+    if (!write_tracking_ || !psp_tiles_valid_ || tile_memory_touched_ || character_memory_touched_) {
+        for (int l = 0; l < 4; l++) build_layer(l);
+        psp_character_dirty_.fill(0);
+        psp_tiles_valid_ = true;
+        tile_memory_touched_ = character_memory_touched_ = false;
+    }
 #else
     for (int l = 0; l < 4; l++) build_layer(l);
 #endif

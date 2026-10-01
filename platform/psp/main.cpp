@@ -381,12 +381,12 @@ private:
             const bool valid = frame_timings.read(f) && f[T::Frame] != 0;
             append("profile_valid=%d profile_frame=%lu board_wall_us=%lu core_wall_us=%lu geometry_wall_us=%lu video_wall_us=%lu\n"
                    "raster_wall_us=%lu tile_cache_wall_us=%lu tile_draw_wall_us=%lu composite_wall_us=%lu present_wall_us=%lu\n"
-                   "main_rom_seek_wall_us=%lu main_rom_read_wall_us=%lu main_rom_pages=%lu\n",
+                   "main_rom_seek_wall_us=%lu main_rom_read_wall_us=%lu main_rom_pages=%lu tiles_rebuilt=%lu\n",
                    int(valid), (unsigned long)f[T::Frame], (unsigned long)f[T::Board], (unsigned long)f[T::Core],
                    (unsigned long)f[T::Geometry], (unsigned long)f[T::Video], (unsigned long)f[T::Raster],
                    (unsigned long)f[T::TileCache], (unsigned long)f[T::TileDraw], (unsigned long)f[T::Composite],
                    (unsigned long)f[T::Present], (unsigned long)f[T::RomSeek], (unsigned long)f[T::RomRead],
-                   (unsigned long)f[T::RomPages]);
+                   (unsigned long)f[T::RomPages], (unsigned long)f[T::TilesRebuilt]);
             for (unsigned i = 0; i < rom_io.size(); ++i) {
                 const auto& io = rom_io[i];
                 const auto phase = io.phase.load();
@@ -449,7 +449,7 @@ int main() {
         diagnostic_enabled = std::fscanf(enabled, "%d", &value) == 1 && value == 1;
         std::fclose(enabled);
     }
-    checkpoint("test06_boot_before_callbacks");
+    checkpoint("test07_boot_before_callbacks");
     int callbacks = sceKernelCreateThread("daytona_callbacks", callback_thread, 0x11, 4096, PSP_THREAD_ATTR_USER, nullptr);
     if (callbacks >= 0 && sceKernelStartThread(callbacks, 0, nullptr) < 0) {
         sceKernelDeleteThread(callbacks); callbacks = -1;
@@ -481,7 +481,7 @@ int main() {
     int selection = 0;
     uint32_t held = 0;
     char message[192] = "Start loads your imported files from roms/.";
-    if (diagnostic_enabled) std::snprintf(message, sizeof(message), "Test06 profiling ON. Logs saved beside EBOOT.PBP.");
+    if (diagnostic_enabled) std::snprintf(message, sizeof(message), "Test07 profiling ON. Logs saved beside EBOOT.PBP.");
     if (diagnostic_log.error()) std::snprintf(message, sizeof(message), "Diagnostic path/write error: %08lx", (unsigned long)uint32_t(diagnostic_log.error()));
     const uint64_t boot_time = now_us();
     uint64_t deadline = boot_time;
@@ -635,7 +635,7 @@ int main() {
                     uint32_t(p.geometry), uint32_t(p.video), uint32_t(v.raster), uint32_t(v.tile_cache),
                     uint32_t(v.tile_draw), uint32_t(v.composite), present_us,
                     uint32_t(after[0] - io_before[0]), uint32_t(after[1] - io_before[1]),
-                    uint32_t(after[2] - io_before[2])});
+                    uint32_t(after[2] - io_before[2]), v.tiles_rebuilt});
             }
             deadline += frame_us;
             if (now_us() > deadline + 4 * frame_us) deadline = now_us(); // No guest instruction or game frame is omitted.

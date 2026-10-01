@@ -27,7 +27,7 @@ struct IoCounters {
 class FrameTimings {
 public:
     enum Field { Frame, Board, Core, Geometry, Video, Raster, TileCache, TileDraw,
-                 Composite, Present, RomSeek, RomRead, RomPages, Count };
+                 Composite, Present, RomSeek, RomRead, RomPages, TilesRebuilt, Count };
     using Snapshot = std::array<uint32_t, Count>;
     void publish(const Snapshot& values) {
         sequence_.fetch_add(1);
