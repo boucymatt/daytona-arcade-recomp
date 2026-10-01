@@ -6,6 +6,7 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <array>
 #include <cstdio>
 #include <stdexcept>
 #include <string>
@@ -13,6 +14,16 @@
 #include <vector>
 
 namespace {
+struct Events {
+    using E = rt::PagedRom::IoEvent;
+    std::array<E, 32> values{};
+    unsigned count = 0;
+    static void collect(void* context, E event) noexcept {
+        auto& self = *static_cast<Events*>(context);
+        assert(self.count < self.values.size());
+        self.values[self.count++] = event;
+    }
+};
 struct Fixture {
     std::string path;
     std::vector<uint8_t> bytes;
@@ -70,6 +81,18 @@ int main() {
         assert(*halves++ == fixture.value(rom.size() - 2, 2));
         assert(*halves == fixture.value(0, 2));
     }
+    {
+        Events events;
+        rt::PagedRom rom(fixture.path, 16384, 4096);
+        rom.set_io_observer(Events::collect, &events);
+        assert(rom.read8(0) == fixture.bytes[0]);
+        assert(events.count == 4);
+        assert(events.values[0] == Events::E::SeekBegin && events.values[1] == Events::E::SeekEnd);
+        assert(events.values[2] == Events::E::ReadBegin && events.values[3] == Events::E::ReadEnd);
+        assert(rom.read8(1) == fixture.bytes[1] && events.count == 4);
+        rom.set_io_observer(nullptr, nullptr);
+        assert(rom.read8(4096) == fixture.bytes[4096] && events.count == 4);
+    }
     uint32_t writable[4]{};
     rt::GeoPtr ram{writable, 4, 5};
     ram.write(0x12345678);
@@ -81,11 +104,15 @@ int main() {
     fails([&] { rt::PagedRom r(fixture.path, 16384, 32768); });
     fails([&] { rt::PagedRom r(fixture.path + ".missing", 16384, 4096); });
     {
+        Events events;
         rt::PagedRom rom(fixture.path, 16384, 4096);
         assert(rom.read8(0) == fixture.bytes[0]);
+        rom.set_io_observer(Events::collect, &events);
         assert(truncate(fixture.path.c_str(), 17) == 0);
         fails([&] { (void)rom.read32(4096); });
         fails([&] { (void)rom.read32(4096); });
+        assert(events.count == 8 && events.values[3] == Events::E::ReadFailed &&
+               events.values[7] == Events::E::ReadFailed);
         // A failed eviction invalidated the old tag. This must re-read and
         // reject the truncated page, not return stale or half-written bytes.
         fails([&] { (void)rom.read8(0); });

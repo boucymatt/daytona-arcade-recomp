@@ -19,6 +19,11 @@ public:
     PagedRom(const PagedRom &) = delete;
     PagedRom &operator=(const PagedRom &) = delete;
 
+    enum class IoEvent { SeekBegin, SeekEnd, SeekFailed, ReadBegin, ReadEnd, ReadFailed };
+    using IoObserver = void (*)(void*, IoEvent) noexcept;
+    // Configure on owner before use; observer/context must outlive this image.
+    // No callbacks on cache hits. Default is null on every platform.
+    void set_io_observer(IoObserver observer, void* context) { observer_ = observer; observer_context_ = context; }
     uint32_t size() const { return size_; }
     size_t cache_bytes() const { return cache_.size(); }
     const Stats &stats() const { return stats_; }
@@ -31,6 +36,9 @@ public:
     uint32_t read32(uint32_t address) const;
 
 private:
+    IoObserver observer_ = nullptr;
+    void* observer_context_ = nullptr;
+    void observe(IoEvent event) const noexcept { if (observer_) observer_(observer_context_, event); }
     std::FILE *file_ = nullptr;
     std::string path_;
     uint32_t size_ = 0;

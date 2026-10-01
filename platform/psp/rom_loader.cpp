@@ -19,10 +19,14 @@ std::vector<uint8_t> resident(const std::string& path, size_t expected) {
     return bytes;
 }
 }
-LoadedGame load_game(const std::string& directory) {
+LoadedGame load_game(const std::string& directory, rt::PagedRom::IoObserver observer,
+                     const std::array<void*, 7>& contexts) {
     const auto path = [&](const char* name) { return directory + "/" + name + ".bin"; };
+    size_t region = 0;
     const auto paged = [&](const char* name, uint32_t bytes, size_t cache) {
-        return std::make_shared<rt::PagedRom>(path(name), bytes, cache);
+        auto image = std::make_shared<rt::PagedRom>(path(name), bytes, cache);
+        image->set_io_observer(observer, contexts.at(region++));
+        return image;
     };
     LoadedGame game;
     // Fixed 832 KiB main-board cache budget; logical ROM masks stay intact.

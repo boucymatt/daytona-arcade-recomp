@@ -67,8 +67,14 @@ const uint8_t *PagedRom::page(uint32_t address) const {
     tags_[slot] = std::numeric_limits<uint32_t>::max();
     last_page_ = UINT32_MAX;
     last_bytes_ = nullptr;
-    if (std::fseek(file_, static_cast<long>(number * kPageBytes), SEEK_SET) != 0 ||
-        std::fread(bytes, 1, kPageBytes, file_) != kPageBytes)
+    observe(IoEvent::SeekBegin);
+    const int seek_result = std::fseek(file_, static_cast<long>(number * kPageBytes), SEEK_SET);
+    observe(seek_result ? IoEvent::SeekFailed : IoEvent::SeekEnd);
+    if (seek_result) throw std::runtime_error("paged ROM: read failure: " + path_);
+    observe(IoEvent::ReadBegin);
+    const size_t read_result = std::fread(bytes, 1, kPageBytes, file_);
+    observe(read_result == kPageBytes ? IoEvent::ReadEnd : IoEvent::ReadFailed);
+    if (read_result != kPageBytes)
         throw std::runtime_error("paged ROM: read failure: " + path_);
     tags_[slot] = number;
     ages_[slot] = serial_;
