@@ -1,5 +1,80 @@
 # Handoff
 
+## PSP per-stage and ROM I/O profiling (2026-10-01)
+
+The new physical test05 psp-diagnostic.log has 44 heartbeats and ends with
+shutdown_before_audio_close and shutdown_audio_closed at frame188, not an
+abrupt missing-log cutoff. It proves audio teardown completed for that run,
+not why the application exited or what happened afterward. No caught exception,
+audio failure, five-second stall or recorded memory exhaustion appeared.
+Pre-3D progress was about5.14fps; first3D progress was only0.61-0.65fps.
+Last active heap free1,029,464B, kernel free1,159,168B; main/audio/observer
+stack-fill free counts221,728/130,028/12,740B. Main's lower watermark than
+the smoke test already appeared during NV loading (normal play loads saves).
+Audio starts5-11voices with3D and rises from~0.5ms to4-11ms/block,
+peaking37.772ms with34late blocks. Neither cache growth nor overclocking was
+justified by these measurements.
+
+Both main and audio sometimes waited on UID34402069. A numeric wait UID alone
+does not identify storage or a driver. Installed SDK read/seek wrappers do not
+hold the descriptor-allocation lock around I/O; FILE handles have their own
+locks, and unbuffered fread has a bulk-read path. Do not re-propose4096 single-
+byte reads or a confirmed global FILE lock as the cause from that log.
+
+Test06 implements the requested measurements, not an optimization:
+- Existing GameLoop/Video clocks enabled for PSP diagnostic mode. Completed
+  frame snapshots separate core/i960+synchronousTGP remainder, geometry, video,
+  raster, tile-cache, tile-draw, composition and presentation wall microseconds.
+- Main-board ROM seek/read time and successfully read page counts per frame.
+- Separate program/main_data/copro_data/polygons/textures/pcm1/pcm2 counters.
+  A default-null PagedRom observer wraps only cache-miss seek/read calls,
+  reports success/failure, and never changes cache contents/address semantics.
+  Hits do not call clocks. Desktop/Vita do not enable this hook.
+- Owner-thread callbacks publish32-bit atomics into fixed PSP storage.
+  Watchdog never reads live caches, FILEs, engine or game profiles. Completed
+  frame snapshots use a bounded sequence check (never spin on preempted main).
+  Per-region live phase/counters are best-effort independent samples.
+- Wall times include preemption/wait/instrumentation. ROM I/O is already
+  included in its caller's stage; do not sum it again. Per-ROM microsecond
+  totals wrap modulo2^32; successful pages are4096B. Counters accumulate across
+  resets; repeated profile_frame values are the same sample.
+- Shutdown checkpoints record system callback/menu/smoke exit path, without
+  claiming that an exit callback identifies a physical poweroff's cause.
+- All profiling is opt-in via existing psp-diagnostics.txt=1. Marker-off normal
+  game behavior remains unchanged. Diagnostic logging still caps files2MiB.
+
+Validation:
+- Full desktop build and PSP cross-build pass. CTest:31passed,2optional
+  Lua tests skipped; the final paged-ROM regression was rebuilt and rerun.
+- I/O ordering, no callbacks on hits/disabled observers, truncated-read failure
+  preservation, successful/failed timing events and32-bit clock wrap covered.
+- Bounded coherent snapshots stress-tested with100,000 concurrent publications.
+  Profile tests pass optimized, ASan/UBSan and TSan; paged-ROM tests pass
+  optimized and ASan/UBSan.
+- Original-PSP/32MB emulator:600frames,419fresh3D,182.701965s,
+  hash a5103ec1c6a9f12d unchanged;16,740audio blocks, no audio/log errors
+  or watchdog incidents,190journal records before shutdown. Normal test
+  completion records exit_reason=3. Heap used/free16,942,360/706,792B,
+  kernel free after audio pause1,290,240B. Observer stack-fill free10,636B
+  with the larger bounded4096B diagnostic formatter.
+- Example emulator frame370: board357364us, video283716us, raster173757us,
+  tile-cache70969us, geometry59984us, main-ROM seek767us/read13748us,
+  126pages. These are NOT physical PSP bottleneck measurements.
+- Emulator evidence: build/psp-emulator/psp-diagnostic-test06-600.log and
+  smoke-{result,progress}-test06-600.txt. No game-derived artifacts are tracked.
+
+Private package: build/psp-test06/PSP/GAME/DAYTONA with checked ROMs and marker,
+no smoke.txt or user saves. Update archive build/psp-test06-update.zip contains
+EBOOT.PBP, marker and instructions only. Keep existing ROMs/settings/saves.
+EBOOT4,540,882B SHA256
+351e7001ac5ec522c06551f8398af68a8c3f43bdef3587c49b70b3111d20bb89.
+
+Next: use a physical test06 log with active3D to separate CPU raster/tile work
+from main/audio ROM I/O pressure before making a targeted performance change.
+Smooth physical PSP gameplay and the previously reported poweroff remain
+unresolved. Resolution480x272, memory budget, clocks and audio engine unchanged.
+
+
 ## PSP shutdown evidence capture (2026-10-01)
 
 Physical feedback supersedes test04's emulator success: gameplay began, then

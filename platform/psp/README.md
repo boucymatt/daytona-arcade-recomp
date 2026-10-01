@@ -80,6 +80,42 @@ reduced main-board reads in a 6,000-frame host race from 3.623 GB to 1.461 GB,
 not to zero. Those numbers include startup, omit audio ROM traffic, and are
 not hardware throughput measurements.
 
+## Test06 performance profiling
+
+The private test06 update enables the same diagnostic marker and keeps native
+480x272 rendering, normal PSP-1000 memory and the existing audio engine.
+This is measurement, not a claimed performance or shutdown fix.
+
+Each active heartbeat includes the last completed profiled frame:
+`profile_valid=1` and `profile_frame` identify a coherent snapshot. Repeated
+frame numbers are the same sample; invalid snapshots must be ignored.
+`board_wall_us` covers run_frame; `core_wall_us` is its i960/synchronous TGP/
+scheduling remainder after geometry and video; `geometry_wall_us` covers the
+vblank-start geometry stage, and `video_wall_us` covers CPU video composition.
+Raster, tile-cache, tile-draw and composite breakdowns are within video.
+`present_wall_us` covers upload/GU/vblank presentation, or zero when skipped.
+
+`main_rom_seek_wall_us`, `main_rom_read_wall_us` and `main_rom_pages` are
+the five main-board regions' cache-miss I/O during that completed frame.
+These are INCLUDED in their caller's stage time, not additional work to sum
+with it. All timings are wall time, including preemption, I/O waiting and
+instrumentation overhead; they are not isolated CPU execution time.
+
+Seven `rom=` lines distinguish program, main_data, copro_data, polygons,
+textures, pcm1 and pcm2. Successful page reads are 4096 bytes. Per-region
+seek/read totals and failures accumulate across game resets within the process;
+microsecond totals explicitly wrap modulo 2^32. Compare successive totals with
+unsigned 32-bit subtraction. `io_phase` is 0=idle, 1=seek, 2=read;
+`active_wall_us` is a best-effort live in-flight duration, not a completed
+sample. These fields are independent atomics and may straddle an I/O boundary.
+Audio ROM counters are published by their owning worker; the observer never
+reads a live FILE/cache or audio engine. Cache hits do not call clocks.
+
+Shutdown checkpoints add `exit_reason`: 0=not recorded, 1=system exit callback,
+2=menu Quit, 3=smoke completed, 4=smoke fault. A callback identifies the
+application exit path, not why firmware requested it or the physical cause of
+a later poweroff. No kernel event UID is assumed to identify storage.
+
 ## Validation and diagnostics
 
 The native 480x272 build completed a 600-frame smoke test in PPSSPPSDL 1.20.4

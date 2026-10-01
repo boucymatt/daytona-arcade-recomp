@@ -110,6 +110,13 @@ physical power loss. Main serializes checkpoint writes with observer start/join
 and publishes heap samples; the observer never inspects live game/heap state.
 Audio teardown must also retain the engine and SRC buffers if a kernel join
 fails, until the worker publishes that its final object access has completed.
+Opt-in PSP performance diagnostics publish coherent completed-frame wall-time
+snapshots and per-ROM cache-miss seek/read counters. I/O observers run only on
+each image's owner, with atomic publication to the watchdog; no observer accesses
+live FILE/cache/engine state. Bounded snapshot reads never spin on a preempted
+main writer. ROM times are included in their caller's stage and must not be
+added again. Timing and exit-reason observations never alter guest scheduling,
+instructions, caches, audio commands or output pixels.
 
 The PSP-1000 target explicitly requests normal memory (SFO MEMSIZE=0). Large
 immutable ROMs use checked, file-backed 4 KiB caches without changing logical
