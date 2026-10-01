@@ -11,6 +11,10 @@
 # A visible 240-frame CPU framebuffer window after attract-mode boot:
 #   bash scripts/test_psp_memory.sh build 1680 build/rom_cache/daytona93 attract 1440 240
 #
+# PSP-only native 480x272 composition, checked independently of the 496x384
+# reference hashes; keeps a separate executable so the default is unchanged:
+#   PSP_NATIVE_VIDEO=1 SKIP_BUILD=1 bash scripts/test_psp_memory.sh build 1680 build/rom_cache/daytona93 attract 1440 240
+#
 # Compare an all-CPU attract final hash with the regular desktop runner:
 #   build/m2run build/rom_cache/daytona93 1680
 #   bash scripts/test_psp_memory.sh build 1680 build/rom_cache/daytona93 attract 0 1680
@@ -25,6 +29,17 @@ rom_dir=${3:-"$build_dir/rom_cache/daytona93"}
 mode=${4:-race}
 render_start=${5:-0}
 render_frames=${6:-0}
+native_video=${PSP_NATIVE_VIDEO:-0}
+if [[ $native_video != 0 && $native_video != 1 ]]; then
+    printf 'PSP_NATIVE_VIDEO must be 0 (reference) or 1 (native 480x272).\n' >&2
+    exit 2
+fi
+compile_definitions=(-DM2_LOW_MEMORY=1)
+executable="$build_dir/test_psp_memory_rom"
+if [[ $native_video == 1 ]]; then
+    compile_definitions+=(-DM2_PSP_NATIVE_VIDEO=1)
+    executable="$build_dir/test_psp_native_memory_rom"
+fi
 if [[ $# -gt 6 || ! $frames =~ ^[0-9]+$ || ! $render_start =~ ^[0-9]+$ ||
       ! $render_frames =~ ^[0-9]+$ || ( $mode != race && $mode != attract ) ]]; then
     printf 'Usage: %s [BUILD_DIR] [FRAMES] [ROM_DIR] [race|attract] [RENDER_START] [RENDER_FRAMES]\n' "$0" >&2
@@ -53,9 +68,9 @@ done
 # These objects take precedence over the matching dense runtime archive
 # members. Generated code touches only the stable runtime bus interfaces.
 "${CXX:-c++}" -std=c++20 -O2 -fno-fast-math -ffp-contract=off \
-    -DM2_LOW_MEMORY=1 \
+    "${compile_definitions[@]}" \
     -DSOFTFLOAT_FAST_INT64 -DLITTLEENDIAN=1 -DTHREAD_LOCAL=__thread \
     -I"$repo_root/src" -I"$repo_root/extern/ymfm/src" \
     "${sources[@]}" "${objects[@]}" "${libraries[@]}" \
-    -o "$build_dir/test_psp_memory_rom"
-"$build_dir/test_psp_memory_rom" "$rom_dir" "$frames" "$mode" "$render_start" "$render_frames"
+    -o "$executable"
+"$executable" "$rom_dir" "$frames" "$mode" "$render_start" "$render_frames"

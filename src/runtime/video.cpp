@@ -33,7 +33,12 @@ Video::Video(const uint8_t *tile_ram, const uint8_t *char_ram)
       // frame is ever drawn without external 3D, allocated then.)
       screen16_(size_t(kLayerStride) * H), sys24_16_(size_t(kLayerStride) * (H + 4)),
 #else
-      screen_(size_t(W) * H), sys24_(size_t(W) * (H + 4)),
+      screen_(size_t(OutputW) * OutputH),
+#ifdef M2_PSP_NATIVE_VIDEO
+      sys24_(size_t(OutputW) * OutputH),
+#else
+      sys24_(size_t(W) * (H + 4)),
+#endif
 #endif
 #if !defined(M2_DC_MEMORY) && !defined(M2_LOW_MEMORY)
       // (Not on the Dreamcast: its layers are screen_ and sys24_ themselves.)
@@ -55,14 +60,55 @@ Video::Video(const uint8_t *tile_ram, const uint8_t *char_ram)
     dec_char_dirty_.resize(0x4000);
     dec_tiles_.resize(4 * 4096);
 #endif
+#ifdef M2_PSP_NATIVE_VIDEO
+    set_psp_stretch(false);
+#endif
 #ifdef M2_VITA_RENDER_OPT
     character_copy_.resize(0x80000);
     character_dirty_.resize(0x4000);
     tile_ram_copy_.resize(0x10000);
     tile_values_.resize(4 * 4096);
+#ifdef M2_PSP_NATIVE_VIDEO
+    background_.resize(size_t(OutputW) * OutputH);
+#else
     background_.resize(size_t(W) * (H + 4));
 #endif
+#endif
 }
+
+void Video::set_psp_stretch(bool stretch) {
+#ifdef M2_PSP_NATIVE_VIDEO
+    if (psp_mapping_valid_ && psp_width_ == (stretch ? OutputW : 363)) return;
+    psp_mapping_valid_ = true;
+    psp_left_ = stretch ? 0 : 58;
+    psp_width_ = stretch ? OutputW : 363;
+    for (int x = 0; x < psp_width_; ++x) {
+        const int logical = (2 * x + 1) * W / (2 * psp_width_);
+        psp_source_x_[psp_left_ + x] = uint16_t(logical);
+        psp_window_bit_[psp_left_ + x] = uint16_t(0x8000 >> ((logical >> 3) & 15));
+    }
+    for (unsigned group = 0; group < psp_mask_boundaries_.size(); ++group)
+        psp_mask_boundaries_[group] = uint16_t(output_x_boundary(int(group) * 128));
+    for (int y = 0; y < OutputH; ++y)
+        psp_source_y_[y] = uint16_t((2 * y + 1) * H / (2 * OutputH));
+    raster_.set_psp_stretch(stretch);
+    render_done_ = false;
+#ifdef M2_VITA_RENDER_OPT
+    background_dirty_ = foreground_dirty_ = true;
+#endif
+#else
+    (void)stretch;
+#endif
+}
+
+#ifdef M2_PSP_NATIVE_VIDEO
+int Video::output_x_boundary(int logical) const {
+    return psp_left_ + (2 * std::clamp(logical, 0, W) * psp_width_ + W - 1) / (2 * W);
+}
+int Video::output_y_boundary(int logical) {
+    return (2 * std::clamp(logical, 0, H) * OutputH + H - 1) / (2 * H);
+}
+#endif
 
 void Video::palette_w(uint32_t offset, const uint8_t *palram, const uint8_t *colorxlat) {
     const uint16_t palcolor = le16(palram, offset);
@@ -313,6 +359,50 @@ void Video::update_tile_cache() {
 // layer's pixmap to the bitmap through the 8-pixel window mask.
 M2_PIXEL_TEMPLATE void Video::draw_rect(std::vector<M2_PIXEL> &dm, const uint16_t *mask, uint16_t tpri, int flags, int win, int L, int sx,
                       int sy, int xx1, int yy1, int xx2, int yy2 M2_PENS) {
+#ifdef M2_PSP_NATIVE_VIDEO
+    const int xbegin = output_x_boundary(xx1), xend = output_x_boundary(xx2);
+    const int ybegin = output_y_boundary(yy1), yend = output_y_boundary(yy2);
+    tpri |= PIXEL_LAYER0;
+    const bool opaque = (flags & DRAW_OPAQUE) != 0;
+    const uint16_t invert = win ? 0xffff : 0;
+    const int first_group = xx1 >> 7, last_group = (xx2 + 127) >> 7;
+    const int source_x_offset = sx - xx1;
+    for (int y = ybegin; y < yend; ++y) {
+        const int logical_y = psp_source_y_[y];
+        const size_t source_row = size_t(sy + logical_y - yy1) * 512;
+        const uint16_t *source = pixmap_[L].data() + source_row;
+        const uint8_t *trans = flags_[L].data() + source_row;
+        const uint16_t *mask_row = mask + logical_y * 4;
+        uint32_t *dest = dm.data() + size_t(y) * OutputW;
+        for (int group = first_group; group < last_group; ++group) {
+            const uint16_t window = mask_row[group] ^ invert;
+            if (window == 0xffff) continue;
+            const int first = std::max(xbegin, int(psp_mask_boundaries_[group]));
+            const int last = std::min(xend, int(psp_mask_boundaries_[group + 1]));
+            if (!window) {
+                if (opaque) {
+                    for (int x = first; x < last; ++x)
+                        dest[x] = pens_[source[psp_source_x_[x] + source_x_offset]];
+                } else {
+                    for (int x = first; x < last; ++x) {
+                        const int i = psp_source_x_[x] + source_x_offset;
+                        if (trans[i] == tpri) dest[x] = pens_[source[i]];
+                    }
+                }
+            } else if (opaque) {
+                for (int x = first; x < last; ++x)
+                    if (!(window & psp_window_bit_[x]))
+                        dest[x] = pens_[source[psp_source_x_[x] + source_x_offset]];
+            } else {
+                for (int x = first; x < last; ++x) {
+                    if (window & psp_window_bit_[x]) continue;
+                    const int i = psp_source_x_[x] + source_x_offset;
+                    if (trans[i] == tpri) dest[x] = pens_[source[i]];
+                }
+            }
+        }
+    }
+#else
     const uint16_t *source = &pixmap_[L][size_t(sy) * 512 + size_t(sx)];
     const uint8_t *trans = &flags_[L][size_t(sy) * 512 + size_t(sx)];
     M2_PIXEL *dest = &dm[size_t(yy1) * size_t(dw_) + size_t(xx1)];
@@ -397,6 +487,7 @@ M2_PIXEL_TEMPLATE void Video::draw_rect(std::vector<M2_PIXEL> &dm, const uint16_
         dest += dw_;
         mask += 4;
     }
+#endif
 }
 
 // tilemap_t::draw with one scroll value: dest (x, y) takes pixmap
@@ -407,7 +498,17 @@ M2_PIXEL_TEMPLATE void Video::tilemap_draw(std::vector<M2_PIXEL> &dm, int L, int
     const uint8_t cat = uint8_t(flags & CATEGORY_MASK);
     const uint8_t mask = (flags & DRAW_OPAQUE) ? CATEGORY_MASK : uint8_t(CATEGORY_MASK | PIXEL_LAYER0);
     const uint8_t value = (flags & DRAW_OPAQUE) ? cat : uint8_t(cat | PIXEL_LAYER0);
-#ifdef M2_DC_SPEED
+#ifdef M2_PSP_NATIVE_VIDEO
+    const int xbegin = output_x_boundary(minx), xend = output_x_boundary(maxx + 1);
+    const int ybegin = output_y_boundary(miny), yend = output_y_boundary(maxy + 1);
+    for (int y = ybegin; y < yend; ++y)
+        for (int x = xbegin; x < xend; ++x) {
+            const size_t i = size_t((psp_source_y_[y] + sy) & 511) * 512 +
+                             size_t((psp_source_x_[x] + sx) & 511);
+            if ((flags_[L][i] & mask) == value)
+                dm[size_t(y) * OutputW + size_t(x)] = pens_[pixmap_[L][i]];
+        }
+#elif defined(M2_DC_SPEED)
     // The same pixels, a row at a time in runs that do not wrap at 512
     // (the per-pixel index and vector lookups cost the SH-4 most of it).
     const uint16_t *const pixmap = pixmap_[L].data();
@@ -729,6 +830,13 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
     if (external_3d_ && !desktop_ && system24_gpu_compatible()) {
         // GXM composes the cached System-24 tile textures around the 3D
         // layer. Do not spend ~35 ms rebuilding CPU bitmaps for scrolling.
+#ifdef M2_PSP_NATIVE_VIDEO
+        for (int y = 0; y < OutputH; ++y) {
+            auto row = screen_.begin() + size_t(y) * OutputW;
+            std::fill(row, row + psp_left_, 0xff000000u);
+            std::fill(row + psp_left_ + psp_width_, row + OutputW, 0xff000000u);
+        }
+#endif
         rendered_now_ = false;
         return;
     }
@@ -812,6 +920,13 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         sys24_.assign(size_t(W) * (H + 4), 0u);
     }
 #endif
+#ifdef M2_PSP_NATIVE_VIDEO
+    auto copy_trans = [&](const uint32_t *source, size_t stride) {
+        for (int y = 0; y < OutputH; ++y)
+            for (int x = 0; x < OutputW; ++x)
+                if (const uint32_t pixel = source[size_t(y) * stride + size_t(x)])
+                    screen_[size_t(y) * OutputW + size_t(x)] = pixel;
+#else
     // Non-zero pixels of a `width`-wide source onto the screen at column `at`.
     const size_t out_w = size_t(width());
     auto copy_trans = [&](const uint32_t *source, size_t stride, int width = W, int at = 0) {
@@ -819,6 +934,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
             for (int x = 0; x < width; ++x)
                 if (const uint32_t pixel = source[size_t(y) * stride + size_t(x)])
                     screen_[size_t(y) * out_w + size_t(at + x)] = pixel;
+#endif
     };
 #ifdef M2_VITA_RENDER_OPT
     before = ticks();
@@ -897,7 +1013,11 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         profile_.tile_draw += ticks() - before;
         profile_.layers_rebuilt = true;
         before = ticks();
+#ifdef M2_PSP_NATIVE_VIDEO
+        copy_trans(sys24_.data(), OutputW);
+#else
         copy_trans(sys24_.data(), W, W, margin_);
+#endif
         profile_.composite += ticks() - before;
     }
 #endif
@@ -962,11 +1082,15 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         rendered_now_ = true;
     }
     before = ticks();
+#ifdef M2_PSP_NATIVE_VIDEO
+    if (render_done_) copy_trans(raster_.pixels(), raster_.stride());
+#else
     if (margin_) {
         if (!render_done_) coverage_ = 0; // no 3D this frame: a 2D screen
         fill_margins();
     }
     if (render_done_) copy_trans(raster_.pixels(), size_t(raster_.stride()), width());
+#endif
     profile_.composite += ticks() - before;
 #ifndef M2_VITA_RENDER_OPT
     if (!hud_edges) {
@@ -977,12 +1101,25 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
     }
 #endif
     before = ticks();
+#ifdef M2_PSP_NATIVE_VIDEO
+    copy_trans(sys24_.data(), OutputW);
+#else
     if (hud_edges && hud_on_) {
         copy_front_hud_to_edges(screen_);
     } else {
         copy_trans(sys24_.data(), W, W, margin_);
     }
+#endif
     profile_.composite += ticks() - before;
+#ifdef M2_PSP_NATIVE_VIDEO
+    // The viewport is composed directly into the panel target; bars are not
+    // guest pixels and must not inherit a changing background palette pen.
+    for (int y = 0; y < OutputH; ++y) {
+        auto row = screen_.begin() + size_t(y) * OutputW;
+        std::fill(row, row + psp_left_, 0xff000000u);
+        std::fill(row + psp_left_ + psp_width_, row + OutputW, 0xff000000u);
+    }
+#endif
 }
 
 // Widescreen, HUD at the edges: the race HUD's side groups (lap and lap
@@ -1107,7 +1244,9 @@ void Video::fill_margins() {
 }
 
 void Video::set_wide_margin(int margin) {
-#ifdef M2_VITA_RENDER_OPT
+#ifdef M2_PSP_NATIVE_VIDEO
+    margin = 0;
+#elif defined(M2_VITA_RENDER_OPT)
     margin = std::clamp(margin, 0, 200);
 #else
     if (external_3d_ && !desktop_) margin = 0;

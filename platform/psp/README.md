@@ -2,9 +2,11 @@
 
 Experimental native PSP port. The i960/TGP game code is statically recompiled
 to Allegrex code on the build host; no CPU interpreter or emulator is shipped.
-The shared CPU rasterizer draws 496x384, then PSP GU presents an RGB565 image
-at 480x272. Native audio has its own device-clocked thread. This is a starting
-port, not a claim of smooth PSP-1000 gameplay or a finished GPU renderer.
+The PSP CPU rasterizer and tile/HUD compositor draw directly into a 480x272
+framebuffer, then PSP GU presents RGB565 pixels 1:1 at 480x272. There is no
+496x384 intermediate screen or 2x output. Guest coordinates and ROM texture
+layouts are retained so gameplay and material mapping stay unchanged. Native
+audio has its own device-clocked thread. This is a starting port, not a claim of smooth PSP-1000 gameplay or a finished GPU renderer.
 
 ## Build and install
 
@@ -51,6 +53,9 @@ and quit. Settings are written to `psp-settings.ini`; cabinet EEPROM and backup
 RAM are saved on pause/reset/quit in `ioboard_eeprom.bin` and `backup_ram.bin`.
 Keep those files when updating EBOOT. CPU/bus clocks are fixed
 at the supported 333/166 MHz maximum; no firmware overclock is installed.
+The 4:3 option uses a 363x272 content area inside the native 480x272 canvas;
+stretch uses its full width. 512-pixel VRAM stride and power-of-two texture
+storage are PSP hardware alignment requirements, not a higher display size.
 Display skip reduces GU upload/presentation only: every game frame, geometry
 update and CPU raster still runs. It is not a cure for a CPU rendering limit.
 
@@ -77,12 +82,19 @@ not hardware throughput measurements.
 
 ## Validation and diagnostics
 
-Current baseline: PPSSPPSDL 1.20.4 in original-PSP/32 MB mode completed a
-600-frame smoke test, rendered textured 3D, and shut audio down cleanly. Its
-final framebuffer hash matches desktop (`36945e52a376dc48`). However, it took
-244 seconds (about 2.46 frames/s including startup), and audio underruns were
-observed. This build is not ready to promise smooth gameplay. Physical
-PSP-1000 operation, long races and save/menu behavior still need testing.
+The native 480x272 build completed a 600-frame smoke test in PPSSPPSDL 1.20.4
+using original-PSP/32 MB mode. Its final hash `a5103ec1c6a9f12d` matches the
+corresponding native-resolution host replay. It took 176.566 seconds (about
+3.40 game frames/s including startup), compared with 244.214 seconds for the
+previous 496x384-rendering build: 27.70% less elapsed time. These are emulator
+measurements, not physical PSP performance.
+
+The test confirmed 480x272 rendering, 333/166 MHz CPU/bus clocks and 1,081,344
+bytes of GE buffer storage. Final malloc arena use was 16,942,248 bytes;
+kernel free memory was 1,306,624 bytes. Audio shut down without errors, but
+378 over-budget audio blocks and emulator underruns remained. This build is
+still not smooth. Physical PSP-1000 operation, long races and save/menu behavior
+need testing; lowering resolution alone does not solve every CPU/storage stall.
 
 Run host regression tests with `ctest --test-dir build --output-on-failure`.
 Synthetic tests cover cache wrapping, eviction, short-read failure, sample
@@ -92,10 +104,14 @@ comparisons use your private imported files:
 ```sh
 bash scripts/test_psp_memory.sh build 6000 build/rom_cache/daytona93 race
 SKIP_BUILD=1 bash scripts/test_psp_memory.sh build 1680 build/rom_cache/daytona93 attract 1440 240
+PSP_NATIVE_VIDEO=1 SKIP_BUILD=1 bash scripts/test_psp_memory.sh build 600 build/rom_cache/daytona93 attract 0 600
 ```
 
-The second command compares every CPU-rendered pixel in 240 visible attract
-frames; these host checks do not replace MAME or physical PSP testing.
+The second command checks 240 visible original-resolution attract frames;
+the third checks all 600 frames at native 480x272. Synthetic native rendering
+tests additionally compare HUD/tile samples against the unchanged reference and
+check perspective texture mapping and polygon clipping. Different resolutions
+have different framebuffer hashes; these host checks do not replace MAME or physical PSP testing.
 
 Normal file logging is off. Fatal loading, memory, I/O or audio errors appear
 in the menu and `psp-fault.log`. The menu reports available heap and unsupported
@@ -111,4 +127,6 @@ inside the malloc arena, not total remaining physical RAM. Remove
 `smoke.txt` before normal play. Use PPSSPP's original PSP model (`PSPModel=0`)
 to test the RAM budget: stock PPSSPPHeadless selects the larger-memory Slim
 model internally and is not a PSP-1000 memory test. Emulator speed is not
-physical PSP performance proof.
+physical PSP performance proof. Set the emulator window to 480x272 with
+`--windowed --xres 480 --yres 272` for a 1x preview; a 960x544 capture is only
+a 2x preview and does not mean the PSP target is rendering at Vita resolution.

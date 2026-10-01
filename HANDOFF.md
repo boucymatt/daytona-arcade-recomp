@@ -1,5 +1,96 @@
 # Handoff
 
+## PSP native 480x272 rendering (2026-10-01)
+
+The PSP-only M2_PSP_NATIVE_VIDEO build now rasterizes geometry and composes
+HUD/tile layers directly into a 480x272 canvas. GU converts to RGB565 and
+presents 1:1 with nearest sampling; it no longer uploads/scales a 496x384
+screen. The original screenshot's 960x544 size was a 2x PPSSPP window, not a
+Vita render target. Previews now use an actual 480x272 emulator window too.
+
+The guest coordinate space remains 496x384. Final geometry coordinates and
+inclusive viewport bounds map to native output pixel centers, preserving
+perspective UV/depth/luma and original checker phase. HUD/tile pixels use
+precomputed inverse-center lookups, retaining all original masks, line-scroll,
+wrap and priority rules. 4:3 has 363x272 content at x=58; stretch uses 480x272.
+GameLoop framebuffer dimensions also advertise the selected native output.
+Both modes allocate only native-size output/composition targets. Guest texture
+sheets/tilemaps remain their hardware formats, not resized ROM data.
+
+PSP-1000 constraints remain explicit: MEMSIZE=0, 32 MB physical/24 MiB user RAM,
+333 MHz CPU/166 MHz bus supported maximum, 1,081,344 bytes GE memory use below
+its 2 MiB budget. The 512-pixel stride/power-of-two upload texture is PSP alignment,
+not Vita resolution. Mutable RAM, original game timing and command sequences
+are not reduced or skipped. Normal logging stays off; smoke reports include
+render dimensions, actual clock readings and buffer usage.
+
+Validation before hardware:
+
+- 28 host CTests passed; two optional Lua tests skipped.
+- Native raster optimized and ASan/UBSan tests cover 480x272 bounds, clipped
+  triangles/quads, both aspects, checker phase and perspective texture values.
+- 33,423,360 synthetic native HUD/tile pixels exactly match the untouched
+  reference sampled at native pixel centers (128 randomized scenes, both
+  aspects, all scroll/window/category modes); ASan/UBSan passed.
+- 1,044,480 pixels from real-game 2D/HUD captures at frames 600, 900, 1440, 1560
+  match the independently compiled reference in both aspects. Native full
+  captures were visually inspected for roads, cars, HUD and logos.
+- Native 1680-frame dense/paged replay with 240 visible renders preserves the
+  same 52,998,145 i960/46,157,202 TGP instructions as the 496x384 default.
+  Native final hash bba1eaa8d6788067, reference c24dbbad1b5f898f: differing
+  resolution means those image hashes SHOULD differ; guest state does not.
+- Native 600-frame full-render replay: hash a5103ec1c6a9f12d, 600 framebuffer
+  comparisons, 419 fresh raster updates, 596 nonblack frames. This is the
+  corresponding native-resolution PSP smoke oracle, not the older 36945e52...
+- Desktop/Vita optimized/reference comparisons pass all 160 randomized screen
+  scenes and 640 raster scenes. Their resolution and default paths are unchanged.
+  Fixed the comparison script's namespace clone to include paged_rom.h; it
+  previously failed on PagedRom declarations before any pixel comparison.
+
+The resolution change saves 487,168 bytes in Video screen/composition storage
+and 657,920 bytes in Raster color/fill storage, less small coordinate tables.
+Final isolated PPSSPPSDL original-PSP smoke completed 600 frames in 176.566
+seconds (3.40 game frames/s including startup), versus 244.214 seconds before:
+27.70% less elapsed time, not a real-hardware performance measurement.
+The native hash a5103ec1c6a9f12d exactly matches the corresponding host replay.
+Reported output is 480x272, clocks 333/166 MHz, VRAM 1,081,344 bytes; final
+malloc arena used 16,942,248 bytes, free 770,392, kernel free 1,306,624.
+Audio shuts down without errors, invalid or unsupported commands, but 378
+blocks exceed 10.667 ms (peak 97.039 ms) and emulator underruns remain.
+This is NOT smooth playback or physical PSP-1000 validation.
+
+The first native-size implementation took 194.316 seconds overall but made
+the early 2D-heavy boot slower: frame 180 was 29.396 seconds, versus 23.916
+seconds in the original build. Per-pixel window-mask work was avoidable.
+Grouping copies by the original 128-pixel mask word and separating opaque,
+transparent, all-masked and mixed cases preserves exact samples and removes
+repeated mask arithmetic. Final frame 180 is 20.997 seconds. All six controlled
+host mask-benchmark hashes stayed identical, and the complete native replay
+hash and instruction/cache counts also stayed unchanged. Do not assume a
+resolution reduction automatically makes every phase faster.
+
+The final PSP EBOOT is 4,525,562 bytes, SHA256
+cbf30caf0f4725258421c9c78be39b98ff11315816bc90e101e1e6a6f4763961.
+PRX loaded size is 0x3c79b0. The ready private install folder is
+build/psp-test03/PSP/GAME/DAYTONA, with verified ROMs and no smoke files.
+The final result is archived at
+build/psp-emulator/smoke-result-native-480-test03.txt.
+The actual 480x272 3D capture is
+build/psp-emulator/psp-native-render-480x272.png (before the pixel-identical
+mask optimization). The post-test screenshot is only the emulator menu,
+not gameplay evidence.
+
+The shared sources also rebuild/package successfully for Vita ARM with
+logging OFF and without M2_PSP_NATIVE_VIDEO. The existing GPU25 archive remains
+untouched. Final build/vita-gpu10/daytona_vita.vpk passes archive validation,
+SHA256 88dbc61cba203c70e13296e0f4730f3082a26dbb89d3fad866220fdc17c59b07.
+No new physical Vita test was performed. The bash-runner contract test skips
+non-POSIX/no-bash hosts; four tests pass on this host.
+
+Next: profile the remaining PSP tile-cache rebuilds, CPU rasterization and
+ROM I/O, then validate a full race, audio, menus, saves and shutdown on an
+actual PSP-1000. The original baseline and limitations remain recorded below.
+
 ## Experimental PSP-1000 frontend (2026-10-01)
 
 The completed Vita/native-audio work was fast-forwarded to main and pushed to

@@ -66,7 +66,7 @@ foreach(name IN LISTS RUNTIME_FILES)
 endforeach()
 add_library(psp_runtime STATIC ${RUNTIME_SOURCES})
 target_include_directories(psp_runtime PUBLIC "${DAYTONA_ROOT}/src")
-target_compile_definitions(psp_runtime PUBLIC M2_LOW_MEMORY=1)
+target_compile_definitions(psp_runtime PUBLIC M2_LOW_MEMORY=1 M2_PSP_NATIVE_VIDEO=1)
 target_link_libraries(psp_runtime PUBLIC psp_trace psp_i960 psp_ymfm)
 # No M2_VITA_RENDER_OPT: its large tile caches are unsuitable for PSP-1000.
 # No SDL or reference interpreter. GU/input/audio use public native PSPSDK APIs.
