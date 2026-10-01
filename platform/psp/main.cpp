@@ -1,4 +1,5 @@
 #include "controls.h"
+#include "diagnostic_log.h"
 #include "frame_progress.h"
 #include "native_audio.h"
 #include "rom_loader.h"
@@ -21,6 +22,7 @@
 #include <memory>
 #include <new>
 #include <stdexcept>
+#include <unistd.h>
 
 PSP_MODULE_INFO("Daytona Recomp PSP", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_USER | PSP_THREAD_ATTR_VFPU);
@@ -33,6 +35,33 @@ namespace {
 std::atomic<uint32_t> running{1};
 psp::FrameProgress frame_progress;
 using Phase = psp::FramePhase;
+psp::DiagnosticLog diagnostic_log;
+bool diagnostic_enabled = false;
+// Written by main; the observer never calls mallinfo on the live game heap.
+struct ResourceSnapshot {
+    std::atomic<uint32_t> used{0}, free{0}, frame{0};
+    void publish() {
+        const auto heap = mallinfo();
+        used.store(uint32_t(heap.uordblks));
+        free.store(uint32_t(heap.fordblks));
+        frame.store(frame_progress.snapshot().frames);
+    }
+} resources;
+void checkpoint(const char* label) {
+    resources.publish();
+    if (!diagnostic_enabled) return;
+    const auto progress = frame_progress.snapshot();
+    char text[768];
+    const int length = std::snprintf(text, sizeof(text),
+        "PSP checkpoint=%.240s time_low_us=%lu phase=%s frames=%lu\n"
+        "heap_used=%lu heap_free=%lu system_free=%lu main_stack_free=%d\n\n",
+        label, (unsigned long)sceKernelGetSystemTimeLow(), psp::phase_name(progress.phase()),
+        (unsigned long)progress.frames, (unsigned long)resources.used.load(),
+        (unsigned long)resources.free.load(), (unsigned long)sceKernelTotalFreeMemSize(),
+        sceKernelGetThreadStackFreeSize(sceKernelGetThreadId()));
+    if (length > 0 && size_t(length) < sizeof(text))
+        diagnostic_log.write(false, text, size_t(length));
+}
 alignas(64) unsigned int display_list[4096];
 constexpr unsigned kWidth = 480, kHeight = 272;
 constexpr unsigned kStride = 512, kDisplayBytes = kStride * kHeight * 2;
@@ -195,6 +224,7 @@ struct Settings {
     }
 };
 void stage(Display& display, const char* message) {
+    checkpoint(message); // Main is the sole writer while the observer is stopped.
     const auto heap = mallinfo();
     std::printf("PSP stage=%s heap_used=%lu heap_free=%lu system_free=%lu\n", message,
                 (unsigned long)heap.uordblks, (unsigned long)heap.fordblks,
@@ -204,10 +234,11 @@ void stage(Display& display, const char* message) {
                         (unsigned long)heap.fordblks / 1024);
     display.present_text();
 }
-unsigned smoke_frames(unsigned& skip) {
+unsigned smoke_frames(unsigned& skip, unsigned& stall_ms) {
     FILE* file = std::fopen("smoke.txt", "r"); if (!file) return 0;
     unsigned frames = 120; skip = 0;
-    std::fscanf(file, "%u %u", &frames, &skip); std::fclose(file);
+    std::fscanf(file, "%u %u %u", &frames, &skip, &stall_ms); std::fclose(file);
+    stall_ms = std::min(stall_ms, 10000u); // Optional, bounded observer fault injection.
     skip = std::min(skip, 3u); return std::clamp(frames, 1u, 6000u);
 }
 using Audio = psp::NativeAudio<snd::NativeSoundEngine>;
@@ -217,6 +248,7 @@ public:
     explicit StallWatchdog(const Audio& audio) : audio_(audio) {}
     ~StallWatchdog() { stop(); }
     bool start() {
+        if (!diagnostic_log.ready()) { error_ = uint32_t(diagnostic_log.error()); return false; }
         main_thread_ = sceKernelGetThreadId();
         if (main_thread_ < 0) { error_ = uint32_t(main_thread_); return false; }
         thread_ = sceKernelCreateThread("daytona_stall", entry, 0x10, 16 * 1024, PSP_THREAD_ATTR_USER, nullptr);
@@ -246,24 +278,34 @@ public:
         if (removed < 0) error_ = uint32_t(removed);
         thread_ = -1;
     }
+    void audio_thread(SceUID thread) { audio_thread_.store(thread, std::memory_order_release); }
     uint32_t error() const { return error_.load(std::memory_order_relaxed); }
     uint32_t incidents() const { return incidents_.load(std::memory_order_relaxed); }
     bool available() const { return thread_ >= 0 && !finished_.load(std::memory_order_acquire); }
 private:
     const Audio& audio_; // Constructed first; joined before audio destruction.
     SceUID thread_ = -1, main_thread_ = -1;
+    std::atomic<SceUID> audio_thread_{-1};
     std::atomic<uint32_t> stop_{1}, finished_{1}, error_{0}, incidents_{0};
     static int entry(SceSize, void* argument) {
         return (*static_cast<StallWatchdog**>(argument))->run();
     }
     int run() noexcept {
         psp::StallDetector detector;
+        uint32_t last_record = sceKernelGetSystemTimeLow();
+        bool periodic_failed = false;
         while (!stop_.load(std::memory_order_acquire)) {
             const auto snapshot = frame_progress.snapshot();
             const uint32_t now = sceKernelGetSystemTimeLow();
             if (detector.observe(snapshot, now)) {
                 incidents_.fetch_add(1, std::memory_order_relaxed);
-                record(snapshot, now, detector.stalled_us(now));
+                record(snapshot, now, detector.stalled_us(now), true);
+            }
+            if (diagnostic_enabled && !periodic_failed && snapshot.active() &&
+                uint32_t(now - last_record) >= 1'000'000) {
+                periodic_failed = !record(snapshot, now, 0, false);
+                // Sync time counts as logging overhead, not another due record.
+                last_record = sceKernelGetSystemTimeLow();
             }
             const int delayed = sceKernelDelayThread(250000);
             if (delayed < 0) { error_ = uint32_t(delayed); break; }
@@ -271,40 +313,49 @@ private:
         finished_.store(1, std::memory_order_release);
         return 0;
     }
-    void record(psp::ProgressSnapshot snapshot, uint32_t now, uint32_t stalled) noexcept {
+    bool record(psp::ProgressSnapshot snapshot, uint32_t now, uint32_t stalled, bool stall) noexcept {
         SceKernelThreadInfo info{};
         info.size = sizeof(info);
         const int status = sceKernelReferThreadStatus(main_thread_, &info);
         const auto sound = audio_.stats();
+        const auto audio_thread = audio_thread_.load(std::memory_order_acquire);
+        SceKernelThreadInfo audio_info{}; audio_info.size = sizeof(audio_info);
+        const int audio_status = audio_thread >= 0 ? sceKernelReferThreadStatus(audio_thread, &audio_info) : -1;
+        const int audio_stack = audio_thread >= 0 ? sceKernelGetThreadStackFreeSize(audio_thread) : -1;
         // Only fixed-size local storage, kernel status, and published atomics.
         // No GU calls, game/Video/heap reads, or shared libc FILE locks.
-        char text[1536];
+        char text[2048];
         const int length = std::snprintf(text, sizeof(text),
-            "PSP no_main_progress time_low_us=%lu stalled_us=%lu phase=%s event=%08lx\n"
+            "PSP %s time_low_us=%lu stalled_us=%lu phase=%s event=%08lx\n"
             "completed_frames=%lu fresh_3d_updates=%lu main_thread=%d status_result=%08lx\n"
             "thread_status=%08lx wait_type=%d wait_id=%d priority=%d run_clocks=%08lx%08lx\n"
             "audio_blocks=%lu audio_frames=%lu queued=%lu voices=%lu failed=%lu system_error=%08lx\n"
             "audio_render_us=%lu peak_render_us=%lu late_blocks=%lu output_call_us=%lu\n"
-            "fairness_yields=%lu fairness_delay_us=%lu\n\n",
-            (unsigned long)now, (unsigned long)stalled, psp::phase_name(snapshot.phase()), (unsigned long)snapshot.event,
+            "fairness_yields=%lu fairness_delay_us=%lu\n"
+            "main_stack_free=%d main_stack_size=%lu observer_stack_free=%d\n"
+            "audio_thread=%d audio_status_result=%08lx audio_status=%08lx audio_wait_type=%d audio_wait_id=%d\n"
+            "audio_stack_free=%d audio_stack_size=%lu\n"
+            "heap_used=%lu heap_free=%lu heap_sample_frame=%lu system_free=%lu largest_block=%lu\n\n",
+            stall ? "no_main_progress" : "heartbeat", (unsigned long)now, (unsigned long)stalled,
+            psp::phase_name(snapshot.phase()), (unsigned long)snapshot.event,
             (unsigned long)snapshot.frames, (unsigned long)snapshot.raster_updates, int(main_thread_), (unsigned long)uint32_t(status),
             (unsigned long)uint32_t(info.status), info.waitType, int(info.waitId), info.currentPriority,
             (unsigned long)info.runClocks.hi, (unsigned long)info.runClocks.low,
             (unsigned long)sound.blocks, (unsigned long)sound.frames, (unsigned long)sound.queued,
             (unsigned long)sound.voices, (unsigned long)sound.failed, (unsigned long)sound.system_error,
             (unsigned long)sound.render_us, (unsigned long)sound.peak_render_us, (unsigned long)sound.late_blocks,
-            (unsigned long)sound.output_call_us, (unsigned long)sound.fairness_yields, (unsigned long)sound.fairness_delay_us);
-        if (length < 0 || size_t(length) >= sizeof(text)) { error_ = uint32_t(-1); return; }
-        const SceUID file = sceIoOpen("psp-stall.log", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_APPEND, 0777);
-        if (file < 0) { error_ = uint32_t(file); return; }
-        int offset = 0;
-        while (offset < length) {
-            const int wrote = sceIoWrite(file, text + offset, unsigned(length - offset));
-            if (wrote <= 0) { error_ = uint32_t(wrote < 0 ? wrote : -1); break; }
-            offset += wrote;
-        }
-        const int closed = sceIoClose(file);
-        if (closed < 0) error_ = uint32_t(closed);
+            (unsigned long)sound.output_call_us, (unsigned long)sound.fairness_yields, (unsigned long)sound.fairness_delay_us,
+            sceKernelGetThreadStackFreeSize(main_thread_), (unsigned long)info.stackSize,
+            sceKernelGetThreadStackFreeSize(sceKernelGetThreadId()), int(audio_thread), (unsigned long)uint32_t(audio_status),
+            (unsigned long)uint32_t(audio_info.status), audio_info.waitType, int(audio_info.waitId),
+            audio_stack, (unsigned long)audio_info.stackSize,
+            (unsigned long)resources.used.load(), (unsigned long)resources.free.load(),
+            (unsigned long)resources.frame.load(), (unsigned long)sceKernelTotalFreeMemSize(),
+            (unsigned long)sceKernelMaxFreeMemSize());
+        if (length < 0 || size_t(length) >= sizeof(text)) { error_ = uint32_t(-1); return false; }
+        const bool ok = diagnostic_log.write(stall, text, size_t(length));
+        if (!ok) error_ = uint32_t(diagnostic_log.error());
+        return ok;
     }
 };
 void report_smoke(const char* result, rt::GameLoop* game, const Audio& audio, const StallWatchdog& watchdog, uint64_t elapsed) {
@@ -331,6 +382,8 @@ void report_smoke(const char* result, rt::GameLoop* game, const Audio& audio, co
             (unsigned long)stats.fairness_delay_us, (unsigned long)completed.raster_updates);
         std::fprintf(file, "watchdog_available=%d\nwatchdog_error=%08lx\nwatchdog_incidents=%lu\n",
             int(watchdog.available()), (unsigned long)watchdog.error(), (unsigned long)watchdog.incidents());
+        std::fprintf(file, "diagnostic_enabled=%d\ndiagnostic_records=%lu\ndiagnostic_error=%08lx\n",
+            int(diagnostic_enabled), (unsigned long)diagnostic_log.records(), (unsigned long)uint32_t(diagnostic_log.error()));
         std::fclose(file);
     }
     std::printf("PSP smoke=%s frames=%llu screen_hash=%016llx audio_failed=%lu\n", result,
@@ -340,17 +393,38 @@ void report_smoke(const char* result, rt::GameLoop* game, const Audio& audio, co
 } // namespace
 
 int main() {
+    // newlib maintains a process cwd; native kernel I/O on a new thread does
+    // not inherit it. Resolve absolute paths here before any worker is started.
+    char cwd[1024];
+    diagnostic_log.initialize(getcwd(cwd, sizeof(cwd)));
+    if (FILE* enabled = std::fopen("psp-diagnostics.txt", "r")) {
+        int value = 0;
+        diagnostic_enabled = std::fscanf(enabled, "%d", &value) == 1 && value == 1;
+        std::fclose(enabled);
+    }
+    checkpoint("test05_boot_before_callbacks");
     int callbacks = sceKernelCreateThread("daytona_callbacks", callback_thread, 0x11, 4096, PSP_THREAD_ATTR_USER, nullptr);
     if (callbacks >= 0 && sceKernelStartThread(callbacks, 0, nullptr) < 0) {
         sceKernelDeleteThread(callbacks); callbacks = -1;
     }
     sceCtrlSetSamplingCycle(0); sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
     // Official PSP maximum, not an overclock. Audio runs at its device clock.
-    scePowerSetClockFrequency(333, 333, 166);
+    const int clock_result = scePowerSetClockFrequency(333, 333, 166);
+    if (diagnostic_enabled) {
+        char text[256];
+        const int length = std::snprintf(text, sizeof(text),
+            "PSP clocks result=%08lx cpu_mhz=%d bus_mhz=%d\n\n",
+            (unsigned long)uint32_t(clock_result), scePowerGetCpuClockFrequencyInt(),
+            scePowerGetBusClockFrequencyInt());
+        if (length > 0 && size_t(length) < sizeof(text))
+            diagnostic_log.write(false, text, size_t(length));
+    }
+    checkpoint("before_graphics");
     Display display;
     stage(display, "PSP-1000 / 32 MB initialization");
     Settings settings; settings.load();
-    unsigned smoke_skip = 0; const unsigned smoke = smoke_frames(smoke_skip);
+    unsigned smoke_skip = 0, smoke_stall_ms = 0;
+    const unsigned smoke = smoke_frames(smoke_skip, smoke_stall_ms);
     if (smoke) settings.display_skip = int(smoke_skip);
     psp::Controls controls;
     std::unique_ptr<rt::GameLoop> game;
@@ -360,10 +434,11 @@ int main() {
     int selection = 0;
     uint32_t held = 0;
     char message[192] = "Start loads your imported files from roms/.";
-    if (!watchdog.start()) std::snprintf(message, sizeof(message), "Stall diagnostics unavailable: %08lx", (unsigned long)watchdog.error());
+    if (diagnostic_enabled) std::snprintf(message, sizeof(message), "Test05 diagnostics ON. Logs saved beside EBOOT.PBP.");
+    if (diagnostic_log.error()) std::snprintf(message, sizeof(message), "Diagnostic path/write error: %08lx", (unsigned long)uint32_t(diagnostic_log.error()));
     const uint64_t boot_time = now_us();
     uint64_t deadline = boot_time;
-    uint32_t board_us = 0, present_us = 0;
+    uint32_t board_us = 0, present_us = 0, resource_time = 0;
     constexpr uint64_t frame_us = 17384; // 656 * 424 / 16 MHz, rounded for host pacing only.
     auto apply_settings = [&] {
         audio.volume(unsigned(settings.volume)); audio.mute(settings.mute != 0);
@@ -371,7 +446,12 @@ int main() {
     };
     auto load_game = [&] {
         frame_progress.active(false, Phase::Loading);
+        watchdog.stop(); // Main owns the journal during loading/checkpoints.
+        if (diagnostic_enabled && diagnostic_log.error())
+            throw std::runtime_error("Diagnostic file unavailable; gameplay not started.");
+        checkpoint("before_game_load");
         frame_progress.reset_frames();
+        watchdog.audio_thread(-1);
         audio.close();
         if (!smoke && !save_cabinet(game.get())) throw std::runtime_error("Cabinet save failed before reset");
         game.reset(); controls = {};
@@ -387,10 +467,19 @@ int main() {
             load_nv("ioboard_eeprom.bin", game->board().io().eeprom);
             load_nv("backup_ram.bin", game->board().backup_ram());
         }
+        checkpoint("before_audio_open");
         if (!audio.open(std::move(loaded.audio))) throw std::runtime_error("Native audio engine missing");
         apply_settings(); stage(display, "Starting dedicated 48 kHz audio thread");
         if (!audio.resume()) throw std::runtime_error("PSP SRC audio/thread startup failed");
+        watchdog.audio_thread(audio.worker_thread());
         stage(display, "Ready: native 480x272 framebuffer + GU");
+        checkpoint("before_first_game_frame");
+        if (diagnostic_enabled && diagnostic_log.error())
+            throw std::runtime_error("Diagnostic write/sync failed; gameplay not started.");
+        if (!watchdog.start()) {
+            if (diagnostic_enabled) throw std::runtime_error("Diagnostic observer could not start.");
+            std::snprintf(message, sizeof(message), "Stall diagnostics unavailable: %08lx", (unsigned long)watchdog.error());
+        }
         controls.latch(held); deadline = now_us(); menu = false;
         frame_progress.active(true, Phase::Input);
     };
@@ -402,6 +491,7 @@ int main() {
             if (start_requested) { start_requested = false; load_game(); }
             if (!menu && psp::menu_chord(held)) {
                 frame_progress.active(false, Phase::Paused);
+                watchdog.audio_thread(-1);
                 audio.pause(); menu = true; controls.latch(held);
                 std::snprintf(message, sizeof(message), "%s", save_cabinet(game.get())
                     ? "Paused. Cabinet settings saved." : "Paused. Cabinet save failed.");
@@ -423,7 +513,7 @@ int main() {
                 if ((pressed & PSP_CTRL_CROSS) && !psp::menu_chord(held)) {
                     if (selection == 0) {
                         if (!game) load_game();
-                        else { if (!audio.resume()) throw std::runtime_error("Audio resume failed"); menu = false; controls.latch(held); deadline = now_us(); frame_progress.active(true, Phase::Input); }
+                        else { if (!audio.resume()) throw std::runtime_error("Audio resume failed"); watchdog.audio_thread(audio.worker_thread()); menu = false; controls.latch(held); deadline = now_us(); frame_progress.active(true, Phase::Input); }
                     } else if (selection == 2 || selection == 3) {
                         if (selection == 2) settings.mute ^= 1; else settings.stretch ^= 1;
                         apply_settings(); std::snprintf(message, sizeof(message), "%s", settings.save() ? "Options saved." : "Could not save options.");
@@ -452,7 +542,12 @@ int main() {
                 if (watchdog.error()) pspDebugScreenPrintf("  Stall diagnostics error: %08lx\n", (unsigned long)watchdog.error());
                 display.present_text(); continue;
             }
+            if (diagnostic_enabled && (diagnostic_log.error() || watchdog.error()))
+                throw std::runtime_error("Diagnostics failed; paused to preserve existing log.");
             const uint64_t now = now_us();
+            if (uint32_t(now) - resource_time >= 1'000'000) {
+                resources.publish(); resource_time = uint32_t(now);
+            }
             if (!smoke && now < deadline) { sceKernelDelayThread(unsigned(std::min<uint64_t>(deadline - now, 2000))); continue; }
             const auto mapped = controls.sample({held, raw.Lx});
             rt::Inputs inputs;
@@ -463,6 +558,10 @@ int main() {
             scePowerTick(0);
             const auto board_begin = smoke ? now_us() : 0;
             frame_progress.mark(Phase::GameFrame);
+            // Test-only delay configured by the third smoke.txt field. No
+            // instruction/frame/sample is discarded, and releases omit it.
+            if (smoke && smoke_stall_ms && game->frames() == 0)
+                sceKernelDelayThread(smoke_stall_ms * 1000);
             game->run_frame(inputs);
             frame_progress.completed(uint32_t(game->frames()), game->board().video().rendered_now());
             if (smoke) board_us = uint32_t(now_us() - board_begin);
@@ -503,12 +602,17 @@ int main() {
             }
             if (smoke && game->frames() >= smoke) {
                 frame_progress.active(false, Phase::Shutdown);
+                watchdog.audio_thread(-1);
                 audio.pause();
                 if (audio.stats().failed) throw std::runtime_error("PSP audio shutdown/drain failed");
                 report_smoke("ok", game.get(), audio, watchdog, now_us() - boot_time); running.store(0);
             }
         } catch (const std::exception& error) {
             frame_progress.active(false, Phase::Idle);
+            watchdog.stop();
+            checkpoint("caught_exception_before_audio_close");
+            checkpoint(error.what()); // Preserve the reason before a potentially blocked drain.
+            watchdog.audio_thread(-1);
             audio.close();
             const bool oom = dynamic_cast<const std::bad_alloc*>(&error) != nullptr;
             std::snprintf(message, sizeof(message), "%s", oom ? "Out of PSP-1000 memory. No game is running." : error.what());
@@ -521,7 +625,10 @@ int main() {
     }
     frame_progress.active(false, Phase::Shutdown);
     watchdog.stop();
+    checkpoint("shutdown_before_audio_close");
+    watchdog.audio_thread(-1);
     audio.close();
+    checkpoint("shutdown_audio_closed");
     if (!smoke && !save_cabinet(game.get())) {
         FILE* fault = std::fopen("psp-fault.log", "a");
         if (fault) { std::fputs("Cabinet save failed during shutdown\n", fault); std::fclose(fault); }

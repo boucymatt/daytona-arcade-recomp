@@ -9,7 +9,13 @@
 #include <vector>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "line %d: %s\n", __LINE__, #x); std::exit(1); } } while (0)
 namespace {
-struct Thread { int (*entry)(SceSize, void*) = nullptr; void* argument = nullptr; std::thread thread; };
+struct Thread {
+    int (*entry)(SceSize, void*) = nullptr;
+    void* argument = nullptr;
+    std::thread thread;
+    std::atomic<bool> complete{true};
+};
+
 std::map<int, Thread> threads;
 int next_thread = 1;
 std::atomic<unsigned> outputs{0}, releases{0}, busy_releases{0};
@@ -20,12 +26,16 @@ std::atomic<uint32_t> mock_clock{0}, mock_render_us{0}, mock_output_us{0};
 std::atomic<unsigned> worker_delays{0}, wrapped_outputs{0};
 std::atomic<uint32_t> last_worker_delay{0};
 std::atomic<int> worker_delay_error{0};
+std::atomic<unsigned> join_error_count{0}, join_errors_seen{0}, delete_error_count{0};
+std::atomic<unsigned> lifecycle_delays{0}, lifecycle_delay_errors{0};
+
 thread_local bool audio_worker = false;
 
 std::mutex buffers_mutex;
 std::vector<const int16_t*> buffers;
 struct Observation {
     std::atomic<unsigned> rendered{0}, bytes{0}, destruction{0}, active{0};
+    std::atomic<bool> hold_render{false};
     uint64_t digest = 1469598103934665603ull;
     bool fail = false;
 };
@@ -40,6 +50,8 @@ struct Engine {
     void render(float* data, size_t count) {
         if (out.fail) throw std::runtime_error("synthetic render fault");
         ++out.active;
+        while (out.hold_render.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
+
         for (size_t i = 0; i < count * 2; ++i) data[i] = i & 1 ? -.5f : .5f;
         if (synthetic_clock.load()) mock_clock.fetch_add(mock_render_us.load());
         ++out.rendered; --out.active;
@@ -84,15 +96,36 @@ int sceKernelCreateThread(const char*, int (*entry)(SceSize, void*), int priorit
 int sceKernelStartThread(int id, SceSize size, void* argument) {
     if (start_failure.load()) return -77;
     CHECK(size == sizeof(void*)); auto& t = threads.at(id); t.argument = *static_cast<void**>(argument);
-    t.thread = std::thread([&t, size] { audio_worker = true; t.entry(size, &t.argument); }); return 0;
+    t.complete = false;
+    t.thread = std::thread([&t, size] {
+        audio_worker = true;
+        t.entry(size, &t.argument);
+        t.complete = true;
+    });
+    return 0;
 }
-int sceKernelWaitThreadEnd(int id, unsigned*) { threads.at(id).thread.join(); return 0; }
-int sceKernelDeleteThread(int id) { threads.erase(id); return 0; }
+int sceKernelWaitThreadEnd(int id, unsigned*) {
+    if (join_error_count.load()) { --join_error_count; ++join_errors_seen; return -91; }
+    auto& t = threads.at(id);
+    if (t.thread.joinable()) t.thread.join();
+    return 0; // Includes a dormant thread whose start failed.
+}
+int sceKernelDeleteThread(int id) {
+    if (delete_error_count.load()) { --delete_error_count; return -92; }
+    auto& t = threads.at(id);
+    if (!t.complete.load()) return -93; // Cannot delete a running worker.
+    if (t.thread.joinable()) t.thread.join();
+    threads.erase(id);
+    return 0;
+}
 int sceKernelDelayThread(unsigned delay) {
     if (audio_worker) {
         ++worker_delays; last_worker_delay = delay;
         if (worker_delay_error.load()) return worker_delay_error.load();
         if (synthetic_clock.load()) mock_clock.fetch_add(delay);
+    } else {
+        ++lifecycle_delays;
+        if (lifecycle_delay_errors.load()) { --lifecycle_delay_errors; return -94; }
     }
     std::this_thread::sleep_for(std::chrono::microseconds(100)); return 0;
 }
@@ -194,7 +227,61 @@ int main() {
     start_failure = true; CHECK(!audio.resume()); start_failure = false;
     audio.close(); CHECK(start.destruction == 1 && !reserved);
 
+    // A failed join must not free the engine, release SRC, or delete a live
+    // worker. Gate its render until teardown has survived a failed fallback
+    // delay as well, exercising both pause() and close() while genuinely live.
+    for (bool close_immediately : {false, true}) {
+        Observation joining;
+        joining.hold_render = true;
+        CHECK(audio.open(std::make_unique<Engine>(joining)) && audio.resume());
+        const auto worker = audio.worker_thread();
+        CHECK(worker >= 0);
+        until([&] { return joining.active == 1; });
+        const auto errors_before = join_errors_seen.load();
+        const auto wait_before = lifecycle_delays.load();
+        const auto release_before = releases.load();
+        join_error_count = 1;
+        lifecycle_delay_errors = 1;
+        std::thread release_worker([&] {
+            until([&] { return join_errors_seen > errors_before && lifecycle_delays >= wait_before + 2; });
+            CHECK(joining.active == 1 && joining.destruction == 0);
+            CHECK(reserved && releases == release_before);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            CHECK(joining.destruction == 0 && releases == release_before);
+            joining.hold_render = false;
+        });
+        if (close_immediately) audio.close();
+        else audio.pause();
+        release_worker.join();
+        CHECK(joining.active == 0 && joining.rendered == 1 && !reserved);
+        CHECK(joining.destruction == unsigned(close_immediately));
+        CHECK(audio.stats().failed && audio.stats().system_error == uint32_t(-91));
+        CHECK(!audio.resume());
+        // Completion may precede the kernel's dormant-state publication, so
+        // a failed DeleteThread must retain its ID for a subsequent retry.
+        audio.close();
+        CHECK(audio.worker_thread() == -1 && joining.destruction == 1);
+    }
+
+    // A dead thread can also fail deletion. Retain its ID and reject opening
+    // a replacement until cleanup succeeds; the completed engine is safe to
+    // destroy even while that dormant kernel handle remains to be retried.
+    Observation deleting, replacement;
+    CHECK(audio.open(std::make_unique<Engine>(deleting)) && audio.resume());
+    until([&] { return deleting.rendered >= 2; });
+    const auto retained_thread = audio.worker_thread();
+    delete_error_count = 2;
+    audio.pause();
+    CHECK(audio.worker_thread() == retained_thread && deleting.destruction == 0 && !reserved);
+    CHECK(audio.stats().failed && audio.stats().system_error == uint32_t(-92));
+    CHECK(!audio.resume());
+    CHECK(!audio.open(std::make_unique<Engine>(replacement)));
+    CHECK(audio.worker_thread() == retained_thread && deleting.destruction == 1 && replacement.destruction == 1);
+    audio.close();
+    CHECK(audio.worker_thread() == -1 && !audio.available());
+
     // A broken SRC release must not leave hardware pointing into freed object storage.
+
     const int16_t* retained = nullptr;
     Observation stuck;
     {
@@ -218,5 +305,5 @@ int main() {
     release_stuck = false; audio.close();
     CHECK(unknown.destruction == 1 && !reserved && audio.stats().failed);
     CHECK(threads.empty());
-    std::puts("PSP native audio: ordered queue,doublebuffer,pause/mute/faults,SRC lifetime and fair-yield/rollover passed");
+    std::puts("PSP native audio: ordered queue,doublebuffer,pause/mute/faults,SRC lifetime, failed-join teardown and fair-yield/rollover passed");
 }
