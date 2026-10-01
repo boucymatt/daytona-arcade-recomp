@@ -65,7 +65,34 @@ public:
     }
     // Vita GPU-fast path: keep the exact CPU tile layers, but let the host
     // draw the 3D polygons. The normal desktop/CPU path remains the default.
-    void set_external_3d(bool enabled) { external_3d_ = enabled; render_done_ = false; gpu_front_margin_ = -1; }
+    // desktop: the desktop hardware renderer, which draws the tilemap layers
+    // itself from the decoded pixmaps (system24_pixels, system24_flags, the
+    // tile generations) and this frame's snapshot (gpu_tile_words,
+    // gpu_pens), keeping widescreen; without it (Vita) the host draws the
+    // tiles at 496.
+    void set_external_3d(bool enabled, bool desktop = false) {
+        if (enabled == external_3d_ && desktop == desktop_) return;
+        external_3d_ = enabled;
+        desktop_ = desktop;
+        gpu_front_margin_ = -1;
+        render_done_ = false;
+    }
+    // External 3D with widescreen and the HUD at the edges: how far the
+    // condition panel's overlay polygons move (0 = not at all), and which.
+    int gpu_hud_shift() const { return external_3d_ && hud_on_ ? margin_ : 0; }
+    // Desktop hardware renderer, as of the last screen_update: tile RAM words
+    // kGpuTileFirst.. (line scroll tables, scroll registers, window masks) and
+    // the tilemaps' pens; the widescreen margin and how to fill it; whether the
+    // front layers come from the CPU (foreground_layer: the HUD moved to the
+    // edges) instead of the pixmaps.
+    static constexpr uint32_t kGpuTileFirst = 0x4000, kGpuTileWords = 0x3000, kGpuPens = 4096;
+    const uint16_t *gpu_tile_words() const { return gpu_tile_words_.data(); }
+    const uint32_t *gpu_pens() const { return gpu_pens_.data(); }
+    int margin() const { return margin_; }
+    enum class Backdrop { Edges, Sky, Stretch }; // fill_margins' three cases
+    Backdrop backdrop() const { return coverage_ < 50 ? Backdrop::Edges : stretch_backdrop_ ? Backdrop::Stretch : Backdrop::Sky; }
+    bool cpu_front() const { return hud_on_; }
+    uint64_t instance() const { return instance_; } // tells a new Video from an old one at the same address
     bool external_3d() const { return external_3d_; }
     const std::vector<uint32_t> &background_layer() const { return background_gpu_; }
     const std::vector<uint32_t> &foreground_layer() const { return foreground_gpu_; }
@@ -116,6 +143,12 @@ private:
     void tilemap_draw(std::vector<uint32_t> &dm, int L, int sx, int sy, int minx, int maxx, int miny, int maxy, int flags);
 
     uint64_t ticks() const { return profile_clock_ ? profile_clock_() : 0; }
+#ifndef M2_VITA_RENDER_OPT
+    void decode_layers();                      // build_layer for changed tiles only
+    std::vector<uint8_t> dec_chars_, dec_char_dirty_; // char RAM as last decoded; characters changed since
+    std::vector<uint16_t> dec_tiles_;          // tile values as last decoded
+    bool dec_valid_ = false;
+#endif
     ProfileClock profile_clock_ = nullptr;
     VideoProfile profile_;
 #ifdef M2_VITA_RENDER_OPT
@@ -146,7 +179,10 @@ private:
     const std::vector<GeoPoly> *gpu_polys_ = nullptr;
     VideoMem gpu_mem_{};
     int gpu_windows_ = 0;
-    bool external_3d_ = false;
+    bool external_3d_ = false, desktop_ = false;
+    std::vector<uint16_t> gpu_tile_words_;
+    std::vector<uint32_t> gpu_pens_;
+    uint64_t instance_;
     int margin_ = 0;
     int dw_ = W;                               // draw()'s output width
     std::vector<uint32_t> stretch_row_;        // widescreen: one backdrop row, for stretching
@@ -161,7 +197,7 @@ private:
     std::vector<int32_t> hud_label_, hud_move_;
     std::vector<std::array<int, 4>> hud_box_;
     std::vector<uint32_t> hud_stack_;
-    void copy_front_hud_to_edges();
+    void copy_front_hud_to_edges(std::vector<uint32_t> &out); // width() wide
     bool write_tracking_ = false, tile_memory_touched_ = false, character_memory_touched_ = false;
     Raster raster_;
     bool rendered_now_ = false, render_done_ = false;

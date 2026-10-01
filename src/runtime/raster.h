@@ -31,6 +31,7 @@ struct VideoMem {
     const uint8_t *lumaram = nullptr;   // 0x12800000, 0x20000 bytes (byte lane 0 of each dword)
     const uint32_t *tex0 = nullptr;     // texture RAM 0, packed as MAME stores it (0x80000 dwords)
     const uint32_t *tex1 = nullptr;     // texture RAM 1
+    uint64_t tex_generation = 0;        // counts writes to texture RAM (changes when either sheet does)
 };
 
 class Raster {
@@ -68,6 +69,14 @@ public:
     bool find_race_hud(const std::vector<GeoPoly> &polys, int crtc_x, int crtc_y);
     int hud_polygon_offset(const GeoPoly& projected) const;
     void set_hud_shift(int dx) { hud_dx_ = dx; }
+    // The box find_race_hud found (x0, x1, y0, y1 in 496-wide coordinates)
+    // and its sort z, for the hardware renderer's copy of the move.
+    const float *hud_box() const { return hud_box_; }
+    uint16_t hud_z() const { return hud_z_; }
+    // Widescreen with the hardware renderer, which leaves no CPU 3D layer to
+    // count: roughly how much of the original 496x384 screen the polygons
+    // cover, in percent, from a coarse rasterization (8x8-pixel cells).
+    int coverage_estimate(const std::vector<GeoPoly> &polys, int windows, int crtc_x, int crtc_y) const;
     uint64_t hash(int minx, int maxx, int miny, int maxy) const; // as the MAME log computes it
 
     struct Extra; // per-polygon shading state (MAME m2_poly_extra_data)

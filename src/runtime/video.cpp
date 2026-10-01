@@ -28,11 +28,19 @@ inline uint32_t rgb(uint32_t r, uint32_t g, uint32_t b) { return 0xff000000u | (
 
 Video::Video(const uint8_t *tile_ram, const uint8_t *char_ram)
     : tile_ram_(tile_ram), char_ram_(char_ram), screen_(size_t(W) * H), sys24_(size_t(W) * (H + 4)),
-      background_gpu_(size_t(W) * H), foreground_gpu_(size_t(W) * H) {
+      background_gpu_(size_t(W) * H), foreground_gpu_(size_t(W) * H), gpu_tile_words_(kGpuTileWords),
+      gpu_pens_(kGpuPens) {
+    static uint64_t instances = 0;
+    instance_ = ++instances;
     for (auto &p : pens_) p = rgb(0, 0, 0); // palette_device starts black
     for (int i = 0; i < 256; i++) gamma_[i] = uint8_t(std::max((double(i) - 64.0) * 255.0 / 191.0, 0.0));
     for (int l = 0; l < 4; l++) pixmap_[l].assign(512 * 512, 0), flags_[l].assign(512 * 512, 0);
     system24_tile_generations_.resize(4 * 4096);
+#ifndef M2_VITA_RENDER_OPT
+    dec_chars_.resize(0x80000);
+    dec_char_dirty_.resize(0x4000);
+    dec_tiles_.resize(4 * 4096);
+#endif
 #ifdef M2_VITA_RENDER_OPT
     character_copy_.resize(0x80000);
     character_dirty_.resize(0x4000);
@@ -77,6 +85,11 @@ void Video::build_layer(int layer) {
             (val & 0x8000 ? foreground_dirty_ : background_dirty_) = true;
         }
         previous = val;
+#else
+        // Desktop: only tiles whose value or character changed (decode_layers).
+        uint16_t &previous = dec_tiles_[base + t];
+        if (dec_valid_ && previous == val && !dec_char_dirty_[code]) continue;
+        previous = val;
 #endif
         ++profile_.tiles_rebuilt;
         system24_source_dirty_ = true;
@@ -95,6 +108,36 @@ void Video::build_layer(int layer) {
             }
     }
 }
+
+#ifndef M2_VITA_RENDER_OPT
+// The four layers' pixmaps, re-decoding only tiles whose tile value or
+// character changed since the last frame: the same pixmaps as decoding all
+// 16,384 tiles every frame, at a fraction of the cost (in a race only the
+// HUD's digits change). Characters are compared (256-byte pages, then 32-byte
+// characters) only on frames the game wrote character RAM.
+void Video::decode_layers() {
+    if (dec_valid_ && (character_memory_touched_ || !write_tracking_)) {
+        std::fill(dec_char_dirty_.begin(), dec_char_dirty_.end(), uint8_t(0));
+        constexpr size_t kPage = 256;
+        for (size_t page = 0; page < dec_chars_.size(); page += kPage) {
+            if (std::memcmp(char_ram_ + page, dec_chars_.data() + page, kPage) == 0) continue;
+            for (size_t c = page / 32; c < (page + kPage) / 32; ++c)
+                if (std::memcmp(char_ram_ + c * 32, dec_chars_.data() + c * 32, 32) != 0) {
+                    dec_char_dirty_[c] = 1;
+                    ++profile_.characters_changed;
+                }
+            std::memcpy(dec_chars_.data() + page, char_ram_ + page, kPage);
+        }
+    } else if (dec_valid_) {
+        std::fill(dec_char_dirty_.begin(), dec_char_dirty_.end(), uint8_t(0));
+    } else {
+        std::memcpy(dec_chars_.data(), char_ram_, dec_chars_.size());
+    }
+    for (int l = 0; l < 4; l++) build_layer(l);
+    dec_valid_ = true;
+    character_memory_touched_ = tile_memory_touched_ = false;
+}
+#endif
 
 #ifdef M2_VITA_RENDER_OPT
 void Video::update_tile_cache() {
@@ -369,14 +412,41 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
 #ifdef M2_VITA_RENDER_OPT
     update_tile_cache();
 #else
-    for (int l = 0; l < 4; l++) build_layer(l);
+    decode_layers();
 #endif
     if (system24_source_dirty_) {
         ++system24_texture_generation_;
         system24_source_dirty_ = false;
     }
     profile_.tile_cache = ticks() - before;
-    if (external_3d_ && system24_gpu_compatible()) {
+#ifndef M2_VITA_RENDER_OPT
+    if (external_3d_ && desktop_) {
+        // Desktop hardware renderer: it draws the tilemap layers from the
+        // pixmaps, with this frame's registers and pens (the game may write
+        // them again before the frame is drawn). The CPU decides what the
+        // composition needs: how to fill the widescreen margins (the 3D
+        // coverage, estimated from the polygons: no CPU 3D layer here) and
+        // whether the HUD moves to the edges, which it does itself (the
+        // front layers drawn here; the condition panel's polygons move on
+        // the GPU, gpu_hud_shift).
+        rendered_now_ = false;
+        for (uint32_t i = 0; i < kGpuTileWords; ++i) gpu_tile_words_[i] = tile(kGpuTileFirst + i);
+        std::copy_n(pens_, kGpuPens, gpu_pens_.data());
+        if (margin_) coverage_ = polys.empty() ? 0 : raster_.coverage_estimate(polys, windows, crtc_x_ + margin_, crtc_y_);
+        hud_on_ = margin_ && hud_edges_ && raster_.find_race_hud(polys, crtc_x_ + margin_, crtc_y_);
+        if (hud_on_) {
+            before = ticks();
+            std::fill(sys24_.begin(), sys24_.end(), 0u);
+            for (int layer = 3; layer >= 0; --layer) draw(sys24_, (layer << 1) | 1, 0);
+            foreground_gpu_.assign(size_t(width()) * H, 0u);
+            copy_front_hud_to_edges(foreground_gpu_);
+            ++foreground_generation_;
+            profile_.tile_draw += ticks() - before;
+        }
+        return;
+    }
+#endif
+    if (external_3d_ && !desktop_ && system24_gpu_compatible()) {
         // GXM composes the cached System-24 tile textures around the 3D
         // layer. Do not spend ~35 ms rebuilding CPU bitmaps for scrolling.
         rendered_now_ = false;
@@ -523,7 +593,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
 #endif
     before = ticks();
     if (hud_edges && hud_on_) {
-        copy_front_hud_to_edges();
+        copy_front_hud_to_edges(screen_);
     } else {
         copy_trans(sys24_.data(), W, W, margin_);
     }
@@ -552,7 +622,7 @@ void Video::set_raster_hud_moves() {
     raster_.set_hud_shift(hud_on_ ? kHudGroups[1].side * margin_ : 0);
 }
 
-void Video::copy_front_hud_to_edges() {
+void Video::copy_front_hud_to_edges(std::vector<uint32_t> &out) {
     const size_t n = size_t(W) * H;
     // Pixels present, widened by kHudJoin in x then y (a square neighbourhood).
     hud_mask_.assign(n, 0);
@@ -606,7 +676,7 @@ void Video::copy_front_hud_to_edges() {
         for (int x = 0; x < W; ++x) {
             const size_t i = size_t(y) * W + size_t(x);
             if (const uint32_t pixel = sys24_[i])
-                screen_[size_t(y) * out_w + size_t(margin_ + x + hud_move_[size_t(hud_label_[i])])] = pixel;
+                out[size_t(y) * out_w + size_t(margin_ + x + hud_move_[size_t(hud_label_[i])])] = pixel;
         }
 }
 

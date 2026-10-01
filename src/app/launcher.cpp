@@ -161,6 +161,15 @@ Launcher::Result Launcher::draw(bool game_running, SDL_Gamepad *pad) {
                 cfg_.gpu = api_ids[api];
                 cfg_.save();
             }
+            static const char *renderers[] = {"Software (exact)", "Hardware (Experimental)"};
+            int rd = cfg_.renderer == "hardware" ? 1 : 0;
+            ImGui::SetNextItemWidth(200);
+            if (ImGui::Combo("Renderer", &rd, renderers, 2)) {
+                cfg_.renderer = rd ? "hardware" : "software";
+                cfg_.save();
+            }
+            ImGui::TextDisabled("Software draws the 3D on the CPU, as the arcade board. Hardware uses the GPU:\n"
+                                "in development, close to but not yet pixel-exact.");
             if (ImGui::Checkbox("Fullscreen", &cfg_.fullscreen)) {
                 SDL_SetWindowFullscreen(window_, cfg_.fullscreen);
                 cfg_.save();
@@ -168,6 +177,15 @@ Launcher::Result Launcher::draw(bool game_running, SDL_Gamepad *pad) {
             if (ImGui::Checkbox("Skip launcher", &cfg_.skip_launcher)) cfg_.save();
             ImGui::SameLine();
             ImGui::TextDisabled("(starts the game straight away; Esc opens this launcher)");
+            static const char *draw_modes[] = {"Double buffered", "Single buffered", "Every third frame"};
+            ImGui::SetNextItemWidth(200);
+            int dm = std::clamp(cfg_.draw_mode, 0, 2);
+            if (ImGui::Combo("Draw mode", &dm, draw_modes, 3)) {
+                cfg_.draw_mode = dm;
+                cfg_.save();
+            }
+            ImGui::TextDisabled("Double buffered draws every frame, as the game does. Single buffered draws\n"
+                                "every 2nd frame, every third frame every 3rd: faster, the game itself is not slowed.");
             ImGui::TextDisabled("Resolution and upscaling options: coming later.");
 
             ImGui::Spacing();

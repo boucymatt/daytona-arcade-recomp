@@ -179,6 +179,137 @@ Changes are local on psvita-native-frontend; no push to main or PSP.
 
 ## Current state
 
+**Tilemaps, step 2: drawn on the GPU (hardware renderer).** m2.hlsl
+ps_tiles_back / ps_tiles_front compose the System 24 layers per pixel with
+Video::draw's rules (window masks, per-line scroll, the split modes, the
+back pass's opaque 3 and 2), then the widescreen margins as fill_margins
+(edge colours, the sky's colour, or stretched). Inputs: the decoded pixmaps
+(a u16 per pixel, pen and category; uploaded by the span of tile rows
+changed since the last upload, by the tile generations; never with
+SDL's cycle flag, which would drop the rows not sent), and a per-frame
+snapshot Video takes at screen_update of tile RAM 0x4000-0x6fff and the
+4,096 pens. Video's external-3D `cpu_layers` is now `desktop`: the CPU only
+estimates the 3D coverage (margin fill) and, with the HUD at the edges in a
+race, still draws the front layers and moves the HUD blobs (uploaded as a
+texture then). Checked against the previous build (CPU-drawn layers):
+byte-identical frames, 0 pixels differ, over race_basic at 4:3, 16:9,
+16:9 stretched and 21:9 with the HUD at the edges, the advanced and expert
+courses, test mode and test drive (622 frames; the races use split modes
+and per-line scroll). race_basic 4:3: 400 -> 526 frames/s; game 1.82 ->
+1.03 ms, renderer CPU 0.53 -> 0.33 ms, GPU 0.16 -> 0.54 ms.
+
+**Tilemaps, step 1: decode only changed tiles (both renderers).** Measured
+first (m2gpushot --bench now reads Video's own timers): of the hardware
+frame's 2.2 ms game time, the CPU tilemaps took 1.27 ms: decoding the four
+512x512 layers 0.55 ms (all 16,384 tiles, every frame), drawing them with the
+scroll/split/mask rules 0.63 ms, composing 0.09 ms. Video::decode_layers
+(desktop; the Vita path keeps its own cache) re-decodes only tiles whose
+value or character changed, comparing character RAM (256-byte pages, then
+32-byte characters) only on frames the game wrote it. Same pixmaps: race,
+time attack, test mode and attract screen hashes unchanged. Decoding 0.55 ->
+0.02 ms; hardware 343 -> 409 frames/s, software race 189 -> 204. Next: the
+layers drawn on the GPU (0.65 ms drawing + 0.09 composing).
+
+**Vulkan application name (MangoHud showed "SDL").** SDL's Vulkan backend
+hard-codes VkApplicationInfo: no application name, engine "SDLGPU", which
+overlays such as MangoHud show instead of the API; SDL has no property to
+change it. `patches/sdl3/0001-vulkan-application-name.patch` (applied by
+setup.py's new apply_patches, shared with MAME's patches; already-applied
+patches are skipped; fetch forces the checkout if a patched file would block
+a new pin) reports SDL_SetAppMetadata's name ("Daytona USA", set by main)
+and no engine name. Checked: setup re-applies it after a revert and skips it
+when present; macOS builds and runs. The MangoHud result itself is untested
+here (no MangoHud on macOS).
+
+**Windows: the game's messages.** daytona is a WIN32 (GUI) program, so on
+Windows its output went nowhere and a command window returned at once; a
+tester could not see which renderer ran. It now attaches to the parent
+console when there is one, else writes daytona.log in the pref folder, and
+prints `daytona: renderer hardware (GPU)` / `software (CPU)` whenever the
+active renderer changes. Checked on macOS (both lines); the Windows branch is
+compiled by CI only.
+
+**Hardware renderer speed (`m2gpushot --bench`).** race_basic, 6,000 frames,
+headless on this Mac (Metal): software 189 frames/s (5.3 ms a frame) at 4:3
+and 188 at 16:9; hardware 324 (3.1 ms) and 347. Hardware frame at 4:3: game
+2.20 ms (logic, geometrizer, CPU tilemap layers), renderer on the CPU 0.72 ms
+(vertices, uploads, a 4 MB texture RAM compare, the colour table), waiting
+for the GPU 0.17 ms. From the draw-mode figures (every third frame drawn:
+442 frames/s), logic is about 0.75 ms, the CPU tilemap layers about 1.45 ms
+and the CPU 3D rasterizer about 3 ms a frame. Next costs, in order: tilemaps
+on the GPU; texture RAM tracked by writes instead of compared.
+Done: M2Board::tex_write counts writes (VideoMem::tex_generation) and the
+renderer uploads texture RAM only when the count moves; the 4 MB compare and
+shadow copy are gone. Renderer CPU 0.72 -> 0.54 ms, 324 -> 346 frames/s at
+4:3; GPU frames byte-identical to before (8 of 8 sampled).
+
+**Hardware renderer, widescreen and a mip-level fix.** Hardware mode keeps
+widescreen: Video's external-3D mode with CPU layers no longer drops the
+margin (only the Vita path does); both layers are width() wide, the
+backdrop's margins filled as in software mode with the 3D coverage taken
+from Raster::coverage_estimate (the polygons on an 8x8-pixel grid; no CPU 3D
+layer exists here) and the front layer's HUD moved to the edges; the GPU
+projects with the margin, widens full-width windows into it, and moves the
+condition panel's quads by Video::gpu_hud_shift (same box and z as the
+software path). Fix found while comparing: the rasterizer's max mip level is
+30 - countl_zero(min(w, h)) = log2(min) - 1; stage 2 used log2(min), so a
+fading circuit-select map (texlod -321, mml 1132) took level 7 not 6 and
+came out coloured instead of grey. Measured after (race_basic, Metal,
+m2gpushot vs m2run, every 650 frames to 5200): 89.7-100% identical,
+94.4-100% within 8 levels; the rest are rounding on high-contrast textures
+(road lines, rock), where a one-step texel coordinate difference flips the
+blend. 16:9 with HUD at the edges: race frames 94.8-98.3% identical.
+
+**Hardware renderer, stage 2 (textures).** ps_poly is a port of the
+rasterizer's draw_tex_span and fetch_bilinear_texel in integer arithmetic:
+the 4-bit sheets with their 2048x1024-as-1024x2048 mapping, bilinear 8-bit
+blending (LERP), wrap/mirror/edge rules, mip levels by fast_log2 (the same
+128-entry table) and texlod, the microtexture, the translucency flag and
+test, the luma RAM and the colour translation. Data: three read-only storage
+buffers (texture RAM, both sheets, uploaded only when it changes; luma RAM;
+colour translation with the rasterizer's gamma applied on the CPU); per
+polygon texture state as flat integers decoded as render_one does; 1/z, u/z,
+v/z interpolated noperspective. Measured (race_basic, Metal, m2gpushot vs
+m2run): frame 1500 99.9% of pixels identical; race frames 3000 and 4500
+95.5% and 95.1% identical, 98.4% and 98.8% within 8 levels. The differences
+are scattered over textured surfaces (far road, rock face), not edges:
+float differences flipping mip-level and texel thresholds. The rasterizer
+accumulates 1/z, u/z, v/z per pixel along each span; the GPU evaluates each
+pixel's directly, and Metal compiles with fast math. Exactness is stage 4.
+build_shaders.py pulls the x86-64 Ubuntu image explicitly (a cached arm64
+one failed with "exec format error").
+
+**Hardware renderer, stage 1 (geometry).** Launcher > Game > Renderer:
+Software (exact; default) or Hardware (Experimental). `src/app/gpu/`:
+`m2.hlsl` (one source) -> `scripts/build_shaders.py` (DXC v1.9.2609 to
+SPIR-V and DXIL, SPIRV-Cross to MSL; Docker when the tools are not
+installed) -> `shaders_gen.h` (committed; builds need no shader tools).
+GpuRenderer draws the 3D in the rasterizer's order (window, then z, newest
+first), projected as model2_3d_project, each polygon a fan from vertex 0,
+clipped to its window by scissor; a depth buffer with depth = draw order
+and LESS reproduces "first polygon to fill a pixel wins" (the rasterizer's
+fill buffer). Colour: the solid renderer's palette/luma/gamma; textures are
+stage 2 (the Vita GPU path is a reference only: a tester saw small road
+geometry/orientation errors there). Video's external-3D mode gained
+`cpu_layers` (the CPU still draws the tilemap layers for it; the Vita path
+does not). No widescreen in hardware mode yet. `m2gpushot` renders frames
+offscreen through it for comparison with m2run's (tools/common/
+input_script.h shared). Checked on Metal: the game runs (710 frames in
+15 s), and a race frame's geometry, HUD and backdrop line up with the
+software renderer's. Not yet run on Vulkan or Direct3D 12.
+
+**Draw mode (frame skip).** Measured first: Daytona runs the board in 60 Hz
+mode and the geometrizer starts a new frame every vblank (3,000 of 3,000
+race frames drew a new 3D picture), i.e. double buffered. Launcher > Game >
+Draw mode: Double buffered (every frame, the default), Single buffered
+(every 2nd), Every third frame (every 3rd); `m2run --frame-skip 0|1|2`.
+M2Board::vblank_end skips screen_update on the frames between (3D raster,
+tilemaps, composition), keeping the last picture; the geometrizer still
+parses every frame (the game reads its polygon count). Measured race_basic:
+identical i960 (196,665,345), TGP (223,429,779) instruction, interrupt
+(12,050) and sound byte (3,636) counts in all three; 190, 332, 442 frames/s
+headless on this Mac. Default hash unchanged.
+
 **Skip launcher.** Launcher > Game > "Skip launcher" (saved): start-up goes
 straight into the game, as `--autostart` does, when the ROM set checks out;
 otherwise the launcher shows with the reason. Esc still opens it. Checked:
@@ -661,18 +792,13 @@ Running the plugin (user's machine, with their ROM set):
 
 ## Next, in order
 
-1. Draw distance for the road: the 14-section window (see Current state)
-   is shared with game logic; extending only what is drawn needs the draw
-   side of it separated. Then the game's own 4:3 object culling, if
-   widescreen shows pop-in.
-2. Run `daytona` on Windows (Direct3D 12 and Vulkan) and fix whatever MSVC
-   rejects. macOS (Metal) is done (Current state).
-   Harvest the states `seed_scan.py` found in MAME (which state the windowed
-   game was in at `0x1d8c`, what reaches `0x2266f8`) and lockstep them.
-3. GPU rasterizer for the 3D layer (SDL_GPU pipelines; shaders compiled to
-   SPIR-V, DXIL and MSL), measured against the CPU reference.
-4. Wheel support and control remapping; resolution options (widescreen is
-   done).
+1. Run `daytona` on Windows (Direct3D 12 and Vulkan) with the hardware
+   renderer; harvest the states `seed_scan.py` found in MAME (which state
+   the windowed game was in at `0x1d8c`, what reaches `0x2266f8`) and
+   lockstep the newly seeded code against MAME.
+2. Hardware renderer: exact pixels against the CPU reference (stage 4), then
+   supersampling / internal resolution.
+3. Wheel support and control remapping.
 
 ## Open decisions
 

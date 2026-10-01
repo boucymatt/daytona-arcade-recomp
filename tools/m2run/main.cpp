@@ -3,7 +3,7 @@
 // frames go to raw dumps (scripts/rgb2png.py converts them).
 //
 //   m2run IMAGES_DIR FRAMES [--inputs scripts/inputs/X.txt] [--dump DIR --every N] [--wav FILE]
-//         [--aspect W:H [--hud-edges] [--stretch-backdrop]] [--draw-distance N]
+//         [--aspect W:H [--hud-edges] [--stretch-backdrop]] [--draw-distance N] [--frame-skip N]
 //
 // --aspect widens the screen (the widescreen enhancement, e.g. 16:9); dumps
 // are then wider than 496 (the width is printed).
@@ -17,6 +17,7 @@
 // limit.
 
 #include "runtime/game_loop.h"
+#include "../common/input_script.h"
 
 #include <algorithm>
 #include <chrono>
@@ -33,58 +34,6 @@
 #include <vector>
 
 namespace {
-
-// scripts/inputs format: "frames N", "<from>-<to> name=value" or "<at> name=value".
-struct Script {
-    struct Line {
-        uint64_t from, to;
-        std::string name;
-        unsigned value;
-    };
-    std::vector<Line> lines;
-    void load(const std::string &path) {
-        std::ifstream f(path);
-        if (!f) throw std::runtime_error("cannot open " + path);
-        std::string s;
-        while (std::getline(f, s)) {
-            if (s.empty() || s[0] == '#' || s.compare(0, 6, "frames") == 0) continue;
-            std::istringstream in(s);
-            std::string range, kv;
-            in >> range >> kv;
-            const auto dash = range.find('-'), eq = kv.find('=');
-            if (eq == std::string::npos) continue;
-            Line l;
-            l.from = std::stoull(range.substr(0, dash));
-            l.to = dash == std::string::npos ? l.from : std::stoull(range.substr(dash + 1));
-            l.name = kv.substr(0, eq);
-            l.value = unsigned(std::stoul(kv.substr(eq + 1), nullptr, 0));
-            lines.push_back(l);
-        }
-    }
-    rt::Inputs at(uint64_t frame) const {
-        rt::Inputs in;
-        static const struct {
-            const char *name;
-            int port; // 0: IN0, 1: IN1
-            uint8_t bit;
-        } buttons[] = {{"coin", 0, 0x01}, {"test", 0, 0x04}, {"service", 0, 0x08}, {"start", 0, 0x10}, {"vr1", 0, 0x20},
-                       {"vr2", 0, 0x40},  {"vr3", 0, 0x80},  {"vr4", 1, 0x01}};
-        static const uint8_t gearvalue[5] = {0, 2, 1, 6, 5}; // MAME daytona_gearbox_r
-        for (const Line &l : lines) {
-            if (frame < l.from || frame > l.to) continue;
-            if (l.name == "steer") in.steer = uint8_t(l.value);
-            else if (l.name == "accel") in.accel = uint8_t(l.value);
-            else if (l.name == "brake") in.brake = uint8_t(l.value);
-            else if (l.name.compare(0, 4, "gear") == 0 && l.value) {
-                const int g = l.name[4] - '0';
-                if (g >= 0 && g < 5) in.in1 = uint8_t((in.in1 & ~0x70) | (gearvalue[g] << 4));
-            } else
-                for (const auto &b : buttons)
-                    if (l.name == b.name && l.value) (b.port ? in.in1 : in.in0) &= uint8_t(~b.bit); // active low
-        }
-        return in;
-    }
-};
 
 // Linear resampling of interleaved stereo to `rate`, added into out.
 void mix_into(std::vector<float> &out, const std::vector<float> &in, double in_rate, double rate) {
@@ -123,6 +72,7 @@ int main(int argc, char **argv) {
     std::string dump_dir, inputs_path, wav_path;
     uint64_t every = 0;
     double aspect = 0;
+    int frame_skip = 0;
     bool hud_edges = false, stretch_backdrop = false;
     for (int i = 3; i < argc; i++) {
         if (!std::strcmp(argv[i], "--hud-edges")) hud_edges = true;
@@ -135,6 +85,7 @@ int main(int argc, char **argv) {
         else if (!std::strcmp(argv[i], "--every")) every = std::strtoull(argv[i + 1], nullptr, 10);
         else if (!std::strcmp(argv[i], "--wav")) wav_path = argv[i + 1];
         else if (!std::strcmp(argv[i], "--draw-distance")) rt::GameLoop::set_draw_distance(std::atoi(argv[i + 1]));
+        else if (!std::strcmp(argv[i], "--frame-skip")) frame_skip = std::atoi(argv[i + 1]);
         else if (!std::strcmp(argv[i], "--aspect")) {
             double w = 0, h = 0;
             if (std::sscanf(argv[i + 1], "%lf:%lf", &w, &h) == 2 && h > 0) aspect = w / h;
@@ -143,13 +94,14 @@ int main(int argc, char **argv) {
 
     try {
         rt::GameLoop game(dir);
+        game.set_frame_skip(frame_skip);
         if (aspect > 0) {
             game.set_aspect(aspect);
             game.set_hud_edges(hud_edges);
             game.set_stretch_backdrop(stretch_backdrop);
             std::printf("m2run: screen %dx%d\n", game.screen_width(), rt::GameLoop::kHeight);
         }
-        Script script;
+        tools::Script script;
         if (!inputs_path.empty()) script.load(inputs_path);
         const auto t0 = std::chrono::steady_clock::now();
         std::vector<float> fm, pcm;
