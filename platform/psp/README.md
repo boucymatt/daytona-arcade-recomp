@@ -114,7 +114,23 @@ check perspective texture mapping and polygon clipping. Different resolutions
 have different framebuffer hashes; these host checks do not replace MAME or physical PSP testing.
 
 Normal file logging is off. Fatal loading, memory, I/O or audio errors appear
-in the menu and `psp-fault.log`. The menu reports available heap and unsupported
+in the menu and `psp-fault.log`. If an active game makes no main-thread progress
+for five seconds, a small observer writes one `psp-stall.log` record for that
+incident. It records the last phase, completed frames/fresh 3D updates, kernel
+thread status and atomic audio counters without touching live game objects or
+restarting anything. Loading and paused menus are excluded. This distinguishes
+a CPU-side stall from a GU/vblank wait if the freeze recurs.
+
+The higher-priority audio worker explicitly yields for a requested 250-1000
+microseconds after every successful output block. An empty SRC queue may make
+its nominally blocking call return immediately, so relying on that call alone
+can starve the game. All samples and game updates are retained; this guard is
+not a claim that rendering now reaches full speed. The smoke report includes
+`audio_output_call_us`, `audio_fairness_yields` and `audio_fairness_delay_us`.
+Test04 completed 600 emulator frames with 419 fresh 3D updates, expected native
+image hash and no watchdog errors/incidents. The reported hardware freeze was
+not reproduced here, so a physical PSP retest is still required.
+ The menu reports available heap and unsupported
 audio commands. Never ignore a fault by increasing cache sizes blindly.
 
 For an explicit cold-boot smoke test, place `smoke.txt` beside EBOOT with two

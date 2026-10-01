@@ -93,7 +93,14 @@ game instructions and board timing remain unchanged. The default desktop/Vita
 reference renderer is unchanged, and there is no second shader path.
 The dedicated native audio thread is the only PSP sound backend and never runs
 the reference sound board. The frame-loop paragraph above describes reference
-sound; native audio advances independently at the device clock.
+sound; native audio advances independently at the device clock. Its higher-priority
+PSP worker must explicitly enter a timed wait after each successful output
+block: an empty SRC queue can make the nominally blocking call return without
+sleeping. Measuring call duration alone cannot prove that main got CPU time.
+The requested wait is 250-1000 microseconds, with no dropped audio samples,
+game frames or guest timing changes. A separate observer reads only published
+atomic progress and kernel thread status; it writes a fault-only stall record
+after five seconds without main progress, never drawing or restarting threads.
 
 The PSP-1000 target explicitly requests normal memory (SFO MEMSIZE=0). Large
 immutable ROMs use checked, file-backed 4 KiB caches without changing logical
