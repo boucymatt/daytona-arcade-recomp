@@ -121,8 +121,10 @@ brings the launcher back.
 **Widescreen** (optional): in the launcher, under **Enhancements**, set
 **Widescreen** to 16:10, 16:9 or 21:9. You see more of the scene at the
 sides, nothing is stretched, and the HUD stays 4:3 in the centre; tick **HUD
-at the screen edges** to move the lap times, position and maps out to the
-sides. Both apply straight away, even mid-race.
+at the screen edges (Experimental)** to move the lap times, position and maps out to the
+sides. In a race the sky at the sides is plain blue; tick **Stretch tile
+background (Experimental)** to stretch the game's own sky picture across
+the whole screen instead. All apply straight away, even mid-race.
 
 **Draw distance** (optional): the slider under **Enhancements** sets how far
 ahead trees, rocks and buildings are drawn. **Default** is the game's own.
@@ -134,7 +136,10 @@ Default keys: arrows to steer, accelerate and brake; 5 inserts a coin,
 Enter is start; A S D F are the view buttons; 1-4 or Q/W change gear. The
 full table is in the [README](../README.md#playing).
 
-To skip the launcher:
+To skip the launcher, tick **Skip launcher** on the Game tab: from then on
+the game starts straight away (Esc still brings the launcher back, where you
+can untick it). If the ROM set is missing or wrong, the launcher shows
+anyway, with the reason. For one run only:
 
     build/daytona --rom roms/daytona93.zip --autostart
 

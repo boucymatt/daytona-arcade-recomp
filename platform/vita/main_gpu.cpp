@@ -109,6 +109,7 @@ struct VitaSettings {
     int deadzone = 12;
     int aspect = 0, draw_distance = 0, steer_curve = 0;
     bool hud_edges = false;
+    bool stretch_backdrop = false, skip_launcher = false;
     bool mute = false;
     bool native_audio = false; // explicitly selected while native fidelity is validated
     bool steer_invert = false;
@@ -135,7 +136,9 @@ struct VitaSettings {
         char line[96], key[40]; int value = 0;
         while (std::fgets(line, sizeof line, f)) {
             if (std::sscanf(line, "%39[^=]=%d", key, &value) != 2) continue;
-            if (!std::strcmp(key, "steer_curve")) steer_curve = value;
+            if (!std::strcmp(key, "stretch_backdrop")) stretch_backdrop = value != 0;
+            else if (!std::strcmp(key, "skip_launcher")) skip_launcher = value != 0;
+            else if (!std::strcmp(key, "steer_curve")) steer_curve = value;
             else if (!std::strcmp(key, "aspect")) aspect = value;
             else if (!std::strcmp(key, "draw_distance")) draw_distance = value;
             else if (!std::strcmp(key, "hud_edges")) hud_edges = value != 0;
@@ -154,6 +157,7 @@ struct VitaSettings {
         if (!f) return false;
         std::fprintf(f, "cpu_clock=%d\ngpu_clock=%d\nvolume=%d\nmute=%d\nnative_audio=%d\ndeadzone=%d\nsteer_invert=%d\n",
                      cpu_clock, gpu_clock, volume, int(mute), int(native_audio), deadzone, int(steer_invert));
+        std::fprintf(f, "stretch_backdrop=%d\nskip_launcher=%d\n", int(stretch_backdrop), int(skip_launcher));
         std::fprintf(f, "steer_curve=%d\n", steer_curve);
         std::fprintf(f, "aspect=%d\ndraw_distance=%d\nhud_edges=%d\n", aspect, draw_distance, int(hud_edges));
         bool ok = std::fflush(f) == 0;
@@ -173,7 +177,7 @@ int cycle_value(int value, const int *choices, int count, int direction) {
 void draw_menu(bool have_game, bool options, int selection, const VitaSettings &settings,
                const std::string &status, double fps) {
     const unsigned white = RGBA8(235,235,235,255), yellow = RGBA8(255,200,70,255);
-    vita::gpu_text(options ? "DAYTONA RECOMP - OPTIONS" : "DAYTONA RECOMP - RECOVERY 1", 30, 24, white, 3, 49, 1);
+    vita::gpu_text(options ? "DAYTONA RECOMP - OPTIONS" : "DAYTONA RECOMP - WIDE 2", 30, 24, white, 3, 49, 1);
     char line[128];
     if (!options) {
         std::snprintf(line, sizeof line, "FPS %.1F  CPU %d MHz  GPU %d MHz  GXM", fps,
@@ -188,7 +192,7 @@ void draw_menu(bool have_game, bool options, int selection, const VitaSettings &
         vita::gpu_text("CROSS SELECT  CIRCLE RESUME  START+SELECT MENU", 30, 516, white, 2, 74, 1);
         return;
     }
-    const char *values[17];
+    const char *values[19];
     char cpu[32], gpu[32], volume[32], mute[32], deadzone[32], invert[32];
     std::snprintf(cpu, sizeof cpu, "CPU CLOCK: %d MHz", settings.cpu_clock);
     std::snprintf(gpu, sizeof gpu, "GPU CLOCK: %d MHz", settings.gpu_clock);
@@ -203,11 +207,13 @@ void draw_menu(bool have_game, bool options, int selection, const VitaSettings &
     static const char* aspects[] = {"ASPECT: ORIGINAL", "ASPECT: 16:10", "ASPECT: 16:9", "ASPECT: 21:9"};
     static const char* distances[] = {"DISTANCE: SHORTEST", "DISTANCE: SHORTER", "DISTANCE: DEFAULT", "DISTANCE: FURTHER", "DISTANCE: FURTHEST"};
     values[11]=aspects[settings.aspect]; values[12]=settings.hud_edges ? "HUD: SCREEN EDGES" : "HUD: CENTRED";
-    values[13]=distances[settings.draw_distance + 2]; values[15]="RESET DEFAULTS"; values[16]="BACK";
+    values[13]=distances[settings.draw_distance + 2]; values[17]="RESET DEFAULTS"; values[18]="BACK";
+    values[15]=settings.stretch_backdrop ? "STRETCH TILE BACKGROUND: ON" : "STRETCH TILE BACKGROUND: OFF";
+    values[16]=settings.skip_launcher ? "SKIP LAUNCHER: ON" : "SKIP LAUNCHER: OFF";
     static const char* curves[] = {"STEERING CURVE: LINEAR", "STEERING CURVE: SOFT", "STEERING CURVE: EXTRA SOFT"};
     values[14]=curves[settings.steer_curve];
     const int first = std::max(0, selection - 11);
-    for (int i = first; i < std::min(first + 12, 17); ++i) {
+    for (int i = first; i < std::min(first + 12, 19); ++i) {
         std::string label = std::string(i == selection ? "> " : "  ") + values[i];
         vita::gpu_text(label, 42, 68 + (i - first) * 32, i == selection ? yellow : white, 2, 70, 1);
     }
@@ -342,6 +348,7 @@ int main(int, char **) {
             static constexpr double aspects[] = {0, 16.0/10, 16.0/9, 21.0/9};
             game->set_aspect(aspects[settings.aspect]);
             game->set_hud_edges(settings.hud_edges);
+            game->set_stretch_backdrop(settings.stretch_backdrop);
         }
     };
     auto commit_settings = [&](bool set_clocks) {
@@ -430,6 +437,9 @@ int main(int, char **) {
         }
     };
 
+    if (settings.skip_launcher && start_game()) { menu = false; clock.reset(); }
+    last = ticks_us();
+
     while (running) {
         const uint64_t now = ticks_us();
         const double elapsed = double(now - last) / 1000000.0;
@@ -448,7 +458,7 @@ int main(int, char **) {
         }
         if (menu && !wait_release) {
             if (options) {
-                constexpr int kOptionCount = 17;
+                constexpr int kOptionCount = 19;
                 if (pressed & vita::Up) selection = (selection + kOptionCount - 1) % kOptionCount;
                 if (pressed & vita::Down) selection = (selection + 1) % kOptionCount;
                 if (pressed & vita::Circle) { options = false; selection = 2; wait_release = true; }
@@ -496,9 +506,13 @@ int main(int, char **) {
                         changed = true;
                     } else if (selection == 14 && (direction || activate)) {
                         settings.steer_curve = (settings.steer_curve + (direction < 0 ? 2 : 1)) % 3; changed = true;
-                    } else if (selection == 15 && activate) {
+                    } else if (selection == 15 && (direction || activate)) {
+                        settings.stretch_backdrop = !settings.stretch_backdrop; changed = true;
+                    } else if (selection == 16 && (direction || activate)) {
+                        settings.skip_launcher = !settings.skip_launcher; changed = true;
+                    } else if (selection == 17 && activate) {
                         settings.defaults(); changed = clocks_changed = true;
-                    } else if (selection == 16 && activate) {
+                    } else if (selection == 18 && activate) {
                         options = false; selection = 2; wait_release = true;
                     }
                     if (changed) {

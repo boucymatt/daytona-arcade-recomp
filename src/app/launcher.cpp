@@ -157,7 +157,7 @@ Launcher::Result Launcher::draw(bool game_running, SDL_Gamepad *pad) {
             for (int i = 0; i < 4; i++)
                 if (cfg_.gpu == api_ids[i]) api = i;
             ImGui::SetNextItemWidth(200);
-            if (ImGui::Combo("Graphics API (applies on restart)", &api, apis, 4)) {
+            if (ImGui::Combo("Graphics API (Restart Required)", &api, apis, 4)) {
                 cfg_.gpu = api_ids[api];
                 cfg_.save();
             }
@@ -165,6 +165,9 @@ Launcher::Result Launcher::draw(bool game_running, SDL_Gamepad *pad) {
                 SDL_SetWindowFullscreen(window_, cfg_.fullscreen);
                 cfg_.save();
             }
+            if (ImGui::Checkbox("Skip launcher", &cfg_.skip_launcher)) cfg_.save();
+            ImGui::SameLine();
+            ImGui::TextDisabled("(starts the game straight away; Esc opens this launcher)");
             ImGui::TextDisabled("Resolution and upscaling options: coming later.");
 
             ImGui::Spacing();
@@ -181,10 +184,12 @@ Launcher::Result Launcher::draw(bool game_running, SDL_Gamepad *pad) {
                 cfg_.save();
             }
             ImGui::BeginDisabled(cfg_.aspect.empty());
-            if (ImGui::Checkbox("HUD at the screen edges", &cfg_.hud_edges)) cfg_.save();
+            if (ImGui::Checkbox("HUD at the screen edges (Experimental)", &cfg_.hud_edges)) cfg_.save();
+            if (ImGui::Checkbox("Stretch tile background (Experimental)", &cfg_.stretch_backdrop)) cfg_.save();
             ImGui::EndDisabled();
             ImGui::TextDisabled("Shows more of the scene at the sides. The HUD stays 4:3 in the centre, or its\n"
-                                "lap times, position and maps move out to the edges.");
+                                "lap times, position and maps move out to the edges. In-game the sky at the\n"
+                                "sides is plain blue, or the game's sky picture stretched across the screen.");
             static const char *distances[] = {"Shortest", "Shorter", "Default", "Further", "Furthest"};
             ImGui::SetNextItemWidth(200);
             int dd = std::clamp(cfg_.draw_distance, -2, 2);
@@ -206,7 +211,7 @@ Launcher::Result Launcher::draw(bool game_running, SDL_Gamepad *pad) {
             }
             ImGui::SameLine();
             if (ImGui::Checkbox("Mute", &cfg_.mute)) cfg_.save();
-            if (ImGui::Checkbox("Native audio (experimental; applies on reset)", &cfg_.native_audio)) cfg_.save();
+            if (ImGui::Checkbox("Native audio (Experimental, Reset Required)", &cfg_.native_audio)) cfg_.save();
             ImGui::TextDisabled("Shared native sequencer/mixer; reference audio remains available for comparison.");
 
             ImGui::Spacing();

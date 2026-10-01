@@ -52,6 +52,10 @@ public:
     bool hud_at_edges_active() const { return hud_on_; }
     int wide_margin() const { return margin_; }
     int width() const { return W + 2 * margin_; }
+    // With widescreen, behind 3D: stretch the tile backdrop across the whole
+    // width (on) or fill the margins with the sky's plain colour (off, default).
+    void set_stretch_backdrop(bool on) { stretch_backdrop_ = on; }
+    bool stretch_backdrop() const { return stretch_backdrop_; }
     // With widescreen: the race HUD's side groups (lap times; position,
     // condition panel, course map) at the screen edges instead of 4:3 centred.
     void set_hud_edges(bool on) {
@@ -61,7 +65,7 @@ public:
     }
     // Vita GPU-fast path: keep the exact CPU tile layers, but let the host
     // draw the 3D polygons. The normal desktop/CPU path remains the default.
-    void set_external_3d(bool enabled) { external_3d_ = enabled; render_done_ = false; }
+    void set_external_3d(bool enabled) { external_3d_ = enabled; render_done_ = false; gpu_front_margin_ = -1; }
     bool external_3d() const { return external_3d_; }
     const std::vector<uint32_t> &background_layer() const { return background_gpu_; }
     const std::vector<uint32_t> &foreground_layer() const { return foreground_gpu_; }
@@ -132,6 +136,9 @@ private:
     std::vector<uint8_t> flags_[4];
     std::vector<uint32_t> screen_, sys24_;
     std::vector<uint32_t> background_gpu_, foreground_gpu_;
+    std::vector<uint32_t> gpu_front_source_;
+    int gpu_front_margin_ = -1;
+    bool gpu_front_hud_ = false;
     uint64_t background_generation_ = 0, foreground_generation_ = 0, system24_texture_generation_ = 0;
     bool system24_source_dirty_ = true;
     std::vector<uint64_t> system24_tile_generations_;
@@ -141,6 +148,11 @@ private:
     int gpu_windows_ = 0;
     bool external_3d_ = false;
     int margin_ = 0;
+    int dw_ = W;                               // draw()'s output width
+    std::vector<uint32_t> stretch_row_;        // widescreen: one backdrop row, for stretching
+    int coverage_ = 100;                       // widescreen: % of the screen the last 3D render covered
+    bool stretch_backdrop_ = false;
+    void fill_margins();
     bool hud_edges_ = false;
     bool hud_on_ = false;                      // the rasterizer is moving the HUD overlay polygons
     void set_raster_hud_moves();

@@ -7,6 +7,7 @@
 // played through SDL audio.
 //
 //   daytona [--rom FILE.zip] [--autostart] [--gpu vulkan|direct3d12|metal]
+//           (the launcher's "Skip launcher" is a saved --autostart)
 //           [--fullscreen] [--frames N] [--audio native|reference]
 //
 // In the game: Esc opens the launcher (resume, reset, controls), F11
@@ -243,7 +244,9 @@ int main(int argc, char **argv) {
     };
 
     bool in_launcher = true, running = true, have_frame = false, new_frame = false;
-    if (autostart && launcher.rom_ok() && start_game()) in_launcher = false;
+    // Skip launcher (saved) or --autostart: straight into the game when the ROM
+    // set checks out; otherwise the launcher shows, with the reason.
+    if ((autostart || cfg.skip_launcher) && launcher.rom_ok() && start_game()) in_launcher = false;
     auto sync_native_audio = [&] {
         if (native_fault) in_launcher = true;
         if (!native_audio.available()) return;
@@ -303,6 +306,7 @@ int main(int argc, char **argv) {
         if (game && !in_launcher) {
             game->set_aspect(cfg.aspect_ratio()); // widescreen: no-op unless it changed
             game->set_hud_edges(cfg.hud_edges);
+            game->set_stretch_backdrop(cfg.stretch_backdrop);
             rt::GameLoop::set_draw_distance(cfg.draw_distance);
             while (pending >= frame_ns) {
                 game->run_frame(cfg.controls.sample(SDL_GetKeyboardState(nullptr), pad));

@@ -11,6 +11,8 @@
 #include "runtime/video.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 
@@ -153,7 +155,7 @@ void Video::draw_rect(std::vector<uint32_t> &dm, const uint16_t *mask, uint16_t 
                       int sy, int xx1, int yy1, int xx2, int yy2) {
     const uint16_t *source = &pixmap_[L][size_t(sy) * 512 + size_t(sx)];
     const uint8_t *trans = &flags_[L][size_t(sy) * 512 + size_t(sx)];
-    uint32_t *dest = &dm[size_t(yy1) * W + size_t(xx1)];
+    uint32_t *dest = &dm[size_t(yy1) * size_t(dw_) + size_t(xx1)];
     tpri |= PIXEL_LAYER0;
     mask += yy1 * 4;
     yy2 -= yy1;
@@ -219,7 +221,7 @@ void Video::draw_rect(std::vector<uint32_t> &dm, const uint16_t *mask, uint16_t 
         }
         source += 512;
         trans += 512;
-        dest += W;
+        dest += dw_;
         mask += 4;
     }
 }
@@ -232,9 +234,9 @@ void Video::tilemap_draw(std::vector<uint32_t> &dm, int L, int sx, int sy, int m
     const uint8_t mask = (flags & DRAW_OPAQUE) ? CATEGORY_MASK : uint8_t(CATEGORY_MASK | PIXEL_LAYER0);
     const uint8_t value = (flags & DRAW_OPAQUE) ? cat : uint8_t(cat | PIXEL_LAYER0);
     for (int y = std::max(miny, 0); y <= std::min(maxy, H - 1); y++)
-        for (int x = std::max(minx, 0); x <= std::min(maxx, W - 1); x++) {
+        for (int x = std::max(minx, 0); x <= std::min(maxx, dw_ - 1); x++) {
             const size_t i = size_t((y + sy) & 511) * 512 + size_t((x + sx) & 511);
-            if ((flags_[L][i] & mask) == value) dm[size_t(y) * W + size_t(x)] = pens_[pixmap_[L][i]];
+            if ((flags_[L][i] & mask) == value) dm[size_t(y) * size_t(dw_) + size_t(x)] = pens_[pixmap_[L][i]];
         }
 }
 
@@ -263,7 +265,7 @@ void Video::draw(std::vector<uint32_t> &bitmap, int layer, int flags) {
                 for (int y = 0; y < H; y++) {
                     const int l1 = y >= v ? layer ^ 1 : layer;
                     const uint16_t h = tile(hscrtb + uint32_t(y)) & 0x1ff;
-                    tilemap_draw(bitmap, l1, -h, sy, 0, W - 1, y, y, fl);
+                    tilemap_draw(bitmap, l1, -h, sy, 0, dw_ - 1, y, y, fl);
                 }
                 break;
             }
@@ -274,8 +276,8 @@ void Video::draw(std::vector<uint32_t> &bitmap, int layer, int flags) {
                     const int h = hscr & 0x1ff;
                     int l1 = layer;
                     if (!(hscr & 0x200)) l1 ^= 1;
-                    tilemap_draw(bitmap, l1, -h, sy, 0, std::min(W - 1, h - 1), y, y, fl);
-                    tilemap_draw(bitmap, l1 ^ 1, -h, sy, std::max(0, h), W - 1, y, y, fl);
+                    tilemap_draw(bitmap, l1, -h, sy, 0, std::min(dw_ - 1, h - 1), y, y, fl);
+                    tilemap_draw(bitmap, l1 ^ 1, -h, sy, std::max(0, h), dw_ - 1, y, y, fl);
                 }
                 break;
             }
@@ -285,16 +287,16 @@ void Video::draw(std::vector<uint32_t> &bitmap, int layer, int flags) {
             case 1: {
                 const int v = (-vscr) & 0x1ff;
                 if (!((-vscr) & 0x200)) layer ^= 1;
-                tilemap_draw(bitmap, layer, sx, sy, 0, W - 1, 0, std::min(H - 1, v - 1), fl);
-                tilemap_draw(bitmap, layer ^ 1, sx, sy, 0, W - 1, std::max(0, v), H - 1, fl);
+                tilemap_draw(bitmap, layer, sx, sy, 0, dw_ - 1, 0, std::min(H - 1, v - 1), fl);
+                tilemap_draw(bitmap, layer ^ 1, sx, sy, 0, dw_ - 1, std::max(0, v), H - 1, fl);
                 break;
             }
             case 2:
             case 3: {
                 const int h = hscr & 0x1ff;
                 if (!(hscr & 0x200)) layer ^= 1;
-                tilemap_draw(bitmap, layer, sx, sy, 0, std::min(W - 1, h - 1), 0, H - 1, fl);
-                tilemap_draw(bitmap, layer ^ 1, sx, sy, std::max(0, h), W - 1, 0, H - 1, fl);
+                tilemap_draw(bitmap, layer, sx, sy, 0, std::min(dw_ - 1, h - 1), 0, H - 1, fl);
+                tilemap_draw(bitmap, layer ^ 1, sx, sy, std::max(0, h), dw_ - 1, 0, H - 1, fl);
                 break;
             }
             }
@@ -308,33 +310,33 @@ void Video::draw(std::vector<uint32_t> &bitmap, int layer, int flags) {
         vscr &= 0x1ff;
         for (int y = 0; y < 384; y++) {
             hscr = uint16_t((-tile(hscrtb + uint32_t(y))) & 0x1ff);
-            if (hscr + 496 <= 512) {
-                draw_rect(bitmap, mask, tpri, flags, win, layer, hscr, vscr, 0, y, 496, y + 1);
+            if (hscr + dw_ <= 512) {
+                draw_rect(bitmap, mask, tpri, flags, win, layer, hscr, vscr, 0, y, dw_, y + 1);
             } else {
                 draw_rect(bitmap, mask, tpri, flags, win, layer, hscr, vscr, 0, y, 512 - hscr, y + 1);
-                draw_rect(bitmap, mask, tpri, flags, win, layer, 0, vscr, 512 - hscr, y, 496, y + 1);
+                draw_rect(bitmap, mask, tpri, flags, win, layer, 0, vscr, 512 - hscr, y, dw_, y + 1);
             }
             vscr = (vscr + 1) & 0x1ff;
         }
     } else {
         hscr = uint16_t((-hscr) & 0x1ff);
         vscr = uint16_t((+vscr) & 0x1ff);
-        if (hscr + 496 <= 512) {
+        if (hscr + dw_ <= 512) {
             if (vscr + 384 <= 512) {
-                draw_rect(bitmap, mask, tpri, flags, win, layer, hscr, vscr, 0, 0, 496, 384);
+                draw_rect(bitmap, mask, tpri, flags, win, layer, hscr, vscr, 0, 0, dw_, 384);
             } else {
-                draw_rect(bitmap, mask, tpri, flags, win, layer, hscr, vscr, 0, 0, 496, 512 - vscr);
-                draw_rect(bitmap, mask, tpri, flags, win, layer, hscr, 0, 0, 512 - vscr, 496, 384);
+                draw_rect(bitmap, mask, tpri, flags, win, layer, hscr, vscr, 0, 0, dw_, 512 - vscr);
+                draw_rect(bitmap, mask, tpri, flags, win, layer, hscr, 0, 0, 512 - vscr, dw_, 384);
             }
         } else {
             if (vscr + 384 <= 512) {
                 draw_rect(bitmap, mask, tpri, flags, win, layer, hscr, vscr, 0, 0, 512 - hscr, 384);
-                draw_rect(bitmap, mask, tpri, flags, win, layer, 0, vscr, 512 - hscr, 0, 496, 384);
+                draw_rect(bitmap, mask, tpri, flags, win, layer, 0, vscr, 512 - hscr, 0, dw_, 384);
             } else {
                 draw_rect(bitmap, mask, tpri, flags, win, layer, hscr, vscr, 0, 0, 512 - hscr, 512 - vscr);
-                draw_rect(bitmap, mask, tpri, flags, win, layer, 0, vscr, 512 - hscr, 0, 496, 512 - vscr);
+                draw_rect(bitmap, mask, tpri, flags, win, layer, 0, vscr, 512 - hscr, 0, dw_, 512 - vscr);
                 draw_rect(bitmap, mask, tpri, flags, win, layer, hscr, 0, 0, 512 - vscr, 512 - hscr, 384);
-                draw_rect(bitmap, mask, tpri, flags, win, layer, 0, 0, 512 - hscr, 512 - vscr, 496, 384);
+                draw_rect(bitmap, mask, tpri, flags, win, layer, 0, 0, 512 - hscr, 512 - vscr, dw_, 384);
             }
         }
     }
@@ -390,6 +392,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
     };
 #ifdef M2_VITA_RENDER_OPT
     before = ticks();
+    const bool rebuild_background = background_dirty_;
     if (background_dirty_) {
         // All tile writes are replacements, not blends. Drawing the back
         // layers over pen 0 is identical to zero + transparent copy over pen 0.
@@ -404,11 +407,32 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         std::fill(sys24_.begin(), sys24_.end(), 0u);
         for (int layer = 3; layer >= 0; --layer) draw(sys24_, (layer << 1) | 1, 0);
         foreground_dirty_ = false;
-        ++foreground_generation_;
+        if (!(external_3d_ && margin_)) ++foreground_generation_;
         profile_.layers_rebuilt = true;
     }
     profile_.tile_draw = ticks() - before;
     before = ticks();
+    if (external_3d_ && margin_) {
+        // Keep the backdrop native-sized: scaling and plain sky margins are
+        // cheap 2D GPU draws, not a CPU widescreen bitmap per frame.
+        if (rebuild_background || background_gpu_.size() != size_t(W) * H)
+            background_gpu_.assign(background_.data(), background_.data() + size_t(W) * H);
+        hud_on_ = hud_edges_ && raster_.find_race_hud(polys, crtc_x_ + margin_, crtc_y_);
+        set_raster_hud_moves();
+        if (gpu_front_margin_ != margin_ || gpu_front_hud_ != hud_on_ || gpu_front_source_ != sys24_) {
+            std::fill(screen_.begin(), screen_.end(), 0u);
+            if (hud_on_) copy_front_hud_to_edges();
+            else copy_trans(sys24_.data(), W, W, margin_);
+            foreground_gpu_ = screen_;
+            gpu_front_source_ = sys24_;
+            gpu_front_margin_ = margin_;
+            gpu_front_hud_ = hud_on_;
+            ++foreground_generation_;
+        }
+        profile_.composite += ticks() - before;
+        rendered_now_ = false;
+        return;
+    }
     if (!margin_) std::copy_n(background_.data(), screen_.size(), screen_.data());
     else {
         std::fill(screen_.begin(), screen_.end(), background_[0]);
@@ -425,19 +449,6 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
     profile_.layers_rebuilt = true;
     before = ticks();
     copy_trans(sys24_.data(), W, W, margin_);
-    if (margin_) {
-        // Widescreen: the back tilemaps (the sky picture, with its clouds and
-        // mountains) are only 496 wide. Fill the side margins, under the 3D
-        // layer, with the sky's plain colour: the back layers' top-left pixel
-        // (open sky). Carrying each row's edge out smeared the clouds.
-        const size_t out_w = size_t(width());
-        const uint32_t sky = screen_[size_t(margin_)];
-        for (int y = 0; y < H; ++y) {
-            uint32_t *row = &screen_[size_t(y) * out_w];
-            std::fill(row, row + margin_, sky);
-            std::fill(row + margin_ + W, row + out_w, sky);
-        }
-    }
     profile_.composite += ticks() - before;
 #endif
     rendered_now_ = false;
@@ -454,7 +465,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         profile_.tile_draw += ticks() - before;
 #endif
         if (margin_) {
-            hud_on_ = hud_edges_ && raster_.race_hud_visible(polys, crtc_x_ + margin_, crtc_y_);
+            hud_on_ = hud_edges_ && raster_.find_race_hud(polys, crtc_x_ + margin_, crtc_y_);
             set_raster_hud_moves();
             std::fill(screen_.begin(), screen_.end(), 0u);
             if (hud_on_) copy_front_hud_to_edges();
@@ -476,7 +487,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         for (int layer = 3; layer >= 0; --layer) draw(sys24_, (layer << 1) | 1, 0);
         profile_.tile_draw += ticks() - before;
         // Only while the race HUD is on screen (its condition panel's box).
-        const bool race_hud = raster_.race_hud_visible(polys, crtc_x_ + margin_, crtc_y_);
+        const bool race_hud = raster_.find_race_hud(polys, crtc_x_ + margin_, crtc_y_);
         if (race_hud != hud_on_) { hud_on_ = race_hud; set_raster_hud_moves(); render_done_ = false; }
     }
     if (!render_done_ && !polys.empty()) {
@@ -484,10 +495,22 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         raster_.render(polys, windows, mem, crtc_x_ + margin_, crtc_y_, render_x_ + margin_, render_y_, 0,
                        width() - 1, 0, H - 1);
         profile_.raster = ticks() - before;
+        if (margin_) { // widescreen: how much of the original screen the 3D layer covers
+            size_t covered = 0;
+            for (int y = 0; y < H; ++y) {
+                const uint32_t *row = raster_.pixels() + size_t(y) * size_t(raster_.stride()) + size_t(margin_);
+                for (int x = 0; x < W; ++x) covered += row[x] != 0;
+            }
+            coverage_ = int(covered * 100 / (size_t(W) * H));
+        }
         render_done_ = true;
         rendered_now_ = true;
     }
     before = ticks();
+    if (margin_) {
+        if (!render_done_) coverage_ = 0; // no 3D this frame: a 2D screen
+        fill_margins();
+    }
     if (render_done_) copy_trans(raster_.pixels(), size_t(raster_.stride()), width());
     profile_.composite += ticks() - before;
 #ifndef M2_VITA_RENDER_OPT
@@ -525,14 +548,8 @@ constexpr int kHudJoin = 4;
 } // namespace
 
 void Video::set_raster_hud_moves() {
-    // The game's overlay polygons inside a group (the condition panel's box
-    // and car) always move with it.
-    Raster::HudMove moves[2];
-    for (int g = 0; g < 2; ++g) {
-        const HudGroup &G = kHudGroups[g];
-        moves[g] = {G.x0, G.x1, G.y0, G.y1, hud_on_ ? G.side * margin_ : 0};
-    }
-    raster_.set_hud_moves(moves, 2);
+    // The condition panel's overlay quads go with the right-hand group.
+    raster_.set_hud_shift(hud_on_ ? kHudGroups[1].side * margin_ : 0);
 }
 
 void Video::copy_front_hud_to_edges() {
@@ -593,6 +610,48 @@ void Video::copy_front_hud_to_edges() {
         }
 }
 
+// Widescreen side margins, under the 3D layer. On a 2D screen (car and
+// circuit select, titles: the 3D layer covers less than half the original
+// screen; measured races 69-100%, select screens about 23%) each row carries
+// its own edge colours out: the art covers only 496 columns. Behind a 3D
+// scene (the race) the margins are the sky's plain colour (the back layers'
+// top-left pixel, open sky), or with "stretch tile background" the backdrop
+// as drawn for the 496 columns is stretched across the whole width, never
+// repeated: the race sky is one 512-pixel layer whose ends do not meet, so
+// drawing it further (tried, also with split pairs) showed a seam.
+void Video::fill_margins() {
+    const bool scene = coverage_ >= 50;
+    const int out = width();
+    const uint32_t sky = screen_[size_t(margin_)];
+    if (scene && stretch_backdrop_) {
+        stretch_row_.resize(size_t(W));
+        for (int y = 0; y < H; ++y) {
+            uint32_t *row = &screen_[size_t(y) * size_t(out)];
+            std::copy_n(row + margin_, W, stretch_row_.data());
+            for (int x = 0; x < out; ++x) {
+                // out column x samples backdrop column (x + 0.5) * W / out - 0.5, blended
+                const float u = std::clamp((float(x) + 0.5f) * float(W) / float(out) - 0.5f, 0.0f, float(W - 1));
+                const int i = int(u), j = std::min(i + 1, W - 1);
+                const float f = u - float(i);
+                const uint32_t a = stretch_row_[size_t(i)], b = stretch_row_[size_t(j)];
+                uint32_t p = 0;
+                for (int k = 0; k < 24; k += 8) {
+                    const float c = float((a >> k) & 0xff) * (1.0f - f) + float((b >> k) & 0xff) * f;
+                    p |= uint32_t(c + 0.5f) << k;
+                }
+                row[x] = p | (a & 0xff000000u);
+            }
+        }
+        return;
+    }
+    for (int y = 0; y < H; ++y) {
+        uint32_t *row = &screen_[size_t(y) * size_t(out)];
+        const uint32_t left = scene ? sky : row[margin_], right = scene ? sky : row[margin_ + W - 1];
+        std::fill(row, row + margin_, left ? left : pens_[0]);
+        std::fill(row + margin_ + W, row + out, right ? right : pens_[0]);
+    }
+}
+
 void Video::set_wide_margin(int margin) {
 #ifdef M2_VITA_RENDER_OPT
     margin = std::clamp(margin, 0, 200);
@@ -601,6 +660,7 @@ void Video::set_wide_margin(int margin) {
 #endif
     if (margin == margin_) return;
     margin_ = margin;
+    gpu_front_margin_ = -1;
     set_raster_hud_moves();
     screen_.assign(size_t(width()) * H, 0u);
     background_gpu_.assign(screen_.size(), 0u);

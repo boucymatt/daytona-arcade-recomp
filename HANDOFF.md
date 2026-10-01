@@ -1,5 +1,49 @@
 # Handoff
 
+## Wide2: merge GitHub main and Vita options (2026-10-01)
+
+Fetched origin/main at c081a2dfcc87fe2087cea51ac0fd6fbd8522e850 and merged its
+six new commits into psvita-native-frontend. Local main and PSP untouched.
+Resolved raster conflicts by retaining upstream's exact condition-panel z/box
+policy, exposed through hud_polygon_offset for both CPU and Vita callers.
+All upstream commits, including desktop launcher/backdrop changes, are retained.
+
+Vita Options now saves Stretch Tile Background and Skip Launcher, both off by
+default. Stretch scales only the native backdrop with the ordinary libvita2d
+2D API. Unlike desktop coverage gating, Vita applies the explicit stretch
+choice to every wide backdrop; world geometry and HUD are not stretched.
+Skip Launcher loads the ROM at next startup; failure returns to the menu with
+its error, and Start+Select still opens the menu in-game. Existing curves and
+cabinet bindings preserved. The menu identifies WIDE 2.
+
+Conservative widescreen optimisation under Rendering/Enhancements policy:
+- Native496x384 background retained instead of widened CPU composition/copies.
+  At16:9, backdrop upload falls1,047,552->761,856bytes (27.27% reduction for
+  this layer, not a frame-rate claim). Plain-sky mode keeps the previous sky
+  colour; stretch uses an ordinary source rectangle, not a custom matrix.
+- Compare foreground pixels and cache grouped HUD output/uploads. Changed
+  pixels, HUD mode and aspect invalidate; unchanged populated/blank HUDs reuse.
+  CPU tile drawing and wider geometry remain real costs.
+- draw_polygons is byte-identical to Recovery1. No perspective-matrix adapter
+  and no reintroduction of the withdrawn wide GPU tile compositor.
+  The old road wobble remains unresolved.
+
+Validation:20CTest passes,2optional Lua skips; final ASan/UBSan contracts pass,
+including native backdrop size, all aspect layouts/stretch source bounds,
+blank/populated HUD cache reuse and changed-pixel invalidation, exact-z HUD
+gating, existing checker/addressing/fence tests. Full host and public VitaSDK
+builds pass.6000frame host replay with16:9, HUD edges, stretch and default
+distance completes:196665345i960,223429779TGP,3636sound-command bytes,
+hash7c4d4b99f80a6e0b.53.38seconds on host is not Vita FPS.
+VPK archive valid; no ROM assets. LoggingOFF.
+Artifact: build/daytona-vita-wide2.vpk
+SHA25690fa51bf27d6143430520e46ebe31d6719f84cd5ecd83a9aa9dc3fcaaaf95133.
+
+No new hardware result yet. Test original/wide, stretch off/on, live HUD changes,
+and next-launch bypass on Vita before claiming improved frame rate or visuals.
+Do not infer GXM correctness from host math alone (IMG_2856 regression below).
+
+
 ## Recovery 1 after hardware regression (2026-10-01)
 
 IMG_2856 shows the c3ec891 package losing most textured scene geometry: road
@@ -135,6 +179,34 @@ Changes are local on psvita-native-frontend; no push to main or PSP.
 
 ## Current state
 
+**Skip launcher.** Launcher > Game > "Skip launcher" (saved): start-up goes
+straight into the game, as `--autostart` does, when the ROM set checks out;
+otherwise the launcher shows with the reason. Esc still opens it. Checked:
+with it set, `daytona` started the game at once (377 frames in 8 s).
+
+**"Stretch tile background" stretches, it does not extend.** In a race, with
+the option on, the backdrop as drawn for the 496 columns is scaled across
+the whole width (linear blend per row); the tester wanted no repeat at all.
+Video::draw_ext (drawing the tiles past the screen edge) is removed. Earlier:
+
+**Widescreen sky: plain by default, "Stretch tile background" to extend.**
+A tester still saw a seam in the margins with the tile backdrop drawn out.
+Measured: the race sky is tilemap layer 2, one layer in normal scroll mode
+(not a split pair: the split-mode alternation added to draw_ext changed 0
+pixels there), and its hscroll sweeps the whole 0..511 range over a lap
+(152 values), so the original 4:3 screen passes the picture's join too;
+only ~79% of rows match across it. So the margins default to the sky's
+plain colour behind 3D, and launcher > Enhancements > "Stretch tile
+background (Experimental)" (`m2run --stretch-backdrop`) draws the tiles out.
+2D screens keep each row's edge colours either way. Split pairs in draw_ext
+now alternate A/B every 512 columns (a 1024-pixel panorama), as the
+hardware's layout implies; not exercised by Daytona's race sky.
+
+**Launcher labels.** Options that need it say so: "Graphics API (Restart
+Required)"; "Native audio (Experimental, Reset Required)" (it applies when a
+game starts or is reset, not on an app restart); "HUD at the screen edges
+(Experimental)". Everything else applies straight away.
+
 **Draw distance (enhancement, off by default).** Launcher slider (Shortest,
 Shorter, Default, Further, Furthest = -2..+2), `m2run --draw-distance N`.
 Found by tracing, not by guessing: the geometrizer's master z clip is unused
@@ -232,7 +304,26 @@ condition panel's box (one checker-shaded overlay polygon, texheader
 0x8000, sort z <= 0x0fff, ~77x82 at x 385..462, y 67..149;
 Raster::race_hud_visible). Measured after: 240 attract frames at 16:9
 identical with the option on and off; the race HUD still moves, and the
-map stays at the edge through the rolling start. The side margins are the sky's plain colour (the back
+map stays at the edge through the rolling start. A tester still saw 3D
+moved in play: the rule was any polygon at sort z <= 0x0fff inside the right
+group. Now only the condition panel's own quads move: polygons at exactly
+the box's z inside the box's outline (Raster::find_race_hud records both).
+Measured: race at 16:10, option on vs off, 0 of 120 frames differ outside
+the HUD areas.
+Side margins: in a 3D scene (the 3D layer covers >= 50% of the screen;
+measured races 69-100%, select screens ~23%) the back layers are drawn
+margin to margin by Video::draw_ext, draw()'s rules pixel by pixel for any
+screen column: scroll, per-line scroll, the split modes that put layers
+L and L^1 side by side, priority, window masks. Checked: its visible columns
+equal draw()'s on every frame of a race (M2_CHECK_DRAW_EXT=1 prints any
+difference; none). Earlier tries, all wrong in play: one plain sky colour;
+each row's edge carried out (smeared the clouds); copying columns mod 512
+(a tester saw the backdrop duplicated with a seam: a column off the screen
+can belong to the other layer of a split pair); a "joins up across the
+wrap" test to tell sky from menus (failed on the race sky, median 79% of
+rows). On 2D screens (car, circuit select) each row carries its own edge
+colours: their art covers only the 496 columns, and drawing further shows
+leftover tiles as stripes. Before that the margins were the sky's plain colour (the back
 layers' top-left pixel); carrying each row's edge out smeared the sky
 picture's clouds and mountains. Off: all scenario hashes unchanged; 21:9
 with it on: all scenarios run to the end. rules.md now lets enhancements change game logic.

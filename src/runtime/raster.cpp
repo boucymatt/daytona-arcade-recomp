@@ -165,7 +165,7 @@ void Raster::render(const std::vector<GeoPoly> &polys, int windows, const VideoM
         if (polys[i].window <= windows) render_one(polys[i], crtc_x, crtc_y, render_x, render_y, clip_minx, clip_maxx, clip_miny, clip_maxy);
 }
 
-bool Raster::race_hud_visible(const std::vector<GeoPoly> &polys, int crtc_x, int crtc_y) const {
+bool Raster::find_race_hud(const std::vector<GeoPoly> &polys, int crtc_x, int crtc_y) {
     for (const GeoPoly &poly : polys) {
         if (poly.z > kHudOverlayZ || poly.texheader[0] != 0x8000 || poly.num_vertices < 3) continue;
         float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f;
@@ -176,27 +176,25 @@ bool Raster::race_hud_visible(const std::vector<GeoPoly> &polys, int crtc_x, int
             const float y = float((384 - poly.center[1]) + crtc_y) - v.y / z;
             x0 = std::min(x0, x), x1 = std::max(x1, x), y0 = std::min(y0, y), y1 = std::max(y1, y);
         }
-        if (x0 >= 375 && x1 <= 472 && y0 >= 57 && y1 <= 159 && x1 - x0 >= 60 && y1 - y0 >= 60) return true;
+        if (x0 >= 375 && x1 <= 472 && y0 >= 57 && y1 <= 159 && x1 - x0 >= 60 && y1 - y0 >= 60) {
+            hud_box_[0] = x0, hud_box_[1] = x1, hud_box_[2] = y0, hud_box_[3] = y1;
+            hud_z_ = poly.z;
+            return true;
+        }
     }
     return false;
 }
 
 int Raster::hud_polygon_offset(const GeoPoly& poly) const {
-    if (poly.num_vertices && hud_moves_count_ && poly.z <= kHudOverlayZ) {
-        float x0 = poly.v[0].x, x1 = x0, y0 = poly.v[0].y, y1 = y0;
-        for (int i = 1; i < poly.num_vertices; i++) {
-            x0 = std::min(x0, poly.v[i].x), x1 = std::max(x1, poly.v[i].x);
-            y0 = std::min(y0, poly.v[i].y), y1 = std::max(y1, poly.v[i].y);
-        }
-        const float sx = float(margin_); // projected x includes the margin
-        for (int m = 0; m < hud_moves_count_; m++) {
-            const HudMove &M = hud_moves_[m];
-            if (M.dx && x0 - sx >= M.x0 && x1 - sx <= M.x1 && y0 >= M.y0 && y1 <= M.y1) {
-                return M.dx;
-            }
-        }
+    if (!hud_dx_ || poly.z != hud_z_ || poly.num_vertices < 3) return 0;
+    float x0 = poly.v[0].x, x1 = x0, y0 = poly.v[0].y, y1 = y0;
+    for (int i = 1; i < poly.num_vertices; ++i) {
+        x0 = std::min(x0, poly.v[i].x); x1 = std::max(x1, poly.v[i].x);
+        y0 = std::min(y0, poly.v[i].y); y1 = std::max(y1, poly.v[i].y);
     }
-    return 0;
+    constexpr float tolerance = 1.5f;
+    return x0 - margin_ >= hud_box_[0] - tolerance && x1 - margin_ <= hud_box_[1] + tolerance &&
+           y0 >= hud_box_[2] - tolerance && y1 <= hud_box_[3] + tolerance ? hud_dx_ : 0;
 }
 
 void Raster::render_one(GeoPoly poly, int crtc_x, int crtc_y, int render_x, int render_y, int clip_minx, int clip_maxx,

@@ -71,11 +71,15 @@ opens first:
 
 - **Game**: choose your `daytona93` ROM set, `.zip` or `.7z` (Browse, or type the path); every file
   is checked against the ROM set this build was recompiled from. Graphics API
-  (automatic, Vulkan, Direct3D 12, Metal) and fullscreen. Enhancements
+  (automatic, Vulkan, Direct3D 12, Metal), fullscreen, and Skip launcher (start
+  the game straight away next time; Esc still opens the launcher). Enhancements
   (off by default): widescreen 16:10, 16:9 or 21:9, which shows more of the
   scene at the sides with the HUD kept 4:3 in the centre, or with "HUD at
-  the screen edges" the lap times, position, condition panel and course map
-  moved out to the sides; and a draw distance slider for the scenery (default
+  the screen edges" (experimental) the lap times, position, condition panel and course map
+  moved out to the sides (in a race the sky at the sides is plain blue, or
+  with "Stretch tile background" the game's sky picture stretched across);
+  and
+  a draw distance slider for the scenery (default
   is the game's own; shorter runs faster). Start.
 - **Controls**: bind every arcade control to a key and a gamepad button or
   axis (click, then press). Triggers and sticks are analogue: the accelerator
