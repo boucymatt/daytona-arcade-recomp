@@ -1,5 +1,61 @@
 # Handoff
 
+## PSP test07 measured tile-cache optimization (2026-10-01)
+
+User confirmed the latest physical log's exit was requested. Do not treat its
+exit_reason=1 as a newly reproduced crash. The remaining task is performance.
+Physical test06 has 22 unique active-3D frame samples (182..203): mean board
+1776.6 ms, geometry713.8 ms, video949.8 ms, raster603.3 ms, tile-cache186.1 ms,
+tile-draw111.3 ms and present27.3 ms. Main ROM seek/read80.7/534.9 ms is
+already INCLUDED in caller stages. Wall times include audio preemption/waits.
+
+Test07 retains decoded PSP tiles, tracks tile words plus dirty glyph bits in
+34 KiB, and rebuilds only changed entries. Board write hooks identify the
+32-byte glyph; unknown-range invalidation and untracked callers rebuild all.
+Palette/scroll/window/aspect changes remain live. No composed-frame cache or
+full character-RAM copy. PSP hot video/raster/geometry/paged-ROM/sample loops
+use -O3, retaining no-fast-math/rounding flags; generated code stays -Os.
+Desktop/Vita paths, clocks333/166, native480x272 and ROM budgets are unchanged.
+Diagnostics add tiles_rebuilt; unchanged scenes often report zero, while
+animated HUD updates rebuild tens of tiles instead of16384.
+
+Validation:
+- Host and PSP cross-builds pass; CTest31passed,2optional Lua tests skipped.
+- Updated PSP video differential tests also pass ASan/UBSan.
+- Synthetic128scene reference test compares33,423,360pixels. New tracked versus
+  untracked tests cover unchanged frames, glyph writes, tile-category changes,
+  palette/scroll/window/aspect changes and unknown-range invalidation.
+- Full6000frame race has exact old/new framebuffer digest14c33947133a8f6c,
+  finalhash de73b6f16dd18f81,196665345i960 and223429779TGP instructions,
+  max2343polygons. No game timing, geometry or pixel shortcuts.
+- Final original-PSP/32MB PPSSPP600frame run:121.640348s versus test06
+  182.701965s,33.42% less emulator-reported elapsed time.419fresh3D updates,
+  finalhash a5103ec1c6a9f12d unchanged. This is NOT physical PSP throughput.
+- Heap used/free16977176/706536B; kernel free after audio pause1290240B.
+  No audio/system/log error or watchdog incident.11075audio blocks,308late,
+  peak95.155ms: underruns remain, so this is not a smooth-gameplay claim.
+- Final binary and preliminary run both reproduced the same frame hash/time.
+  Evidence build/psp-emulator/{smoke-result,smoke-progress,psp-diagnostic}-test07-600.*.
+  Journal appends sessions; use the LAST test07_boot record for final-run data.
+  Visual snapshot test07-final-3d.png inspected at native480x272.
+
+Rejected/deferred: increasing caches blindly risks the PSP1000 headroom.
+A temporary associativity harness varied program/main/copro only; main misses
+79191->70582 at16ways over6000race frames, copro275->94 at8ways. Polygon and
+texture caches were NOT varied in that experiment. A cache-size environment
+experiment did not wire its inputs into those constructors, so its output is
+not evidence about larger caches. All exploratory API/harness edits removed;
+production cache policy unchanged. Do not report these as texture-I/O gains.
+
+Private update build/psp-test07-update.zip contains EBOOT,diagnostic marker
+and instructions only. Full private folder build/psp-test07/PSP/GAME/DAYTONA
+contains verified ROMs, no smoke marker or saves. EBOOT4608862bytes,SHA256
+ dec08d96feb232f916f01f941f1ba99e3980c617d67d8d2eb242e43f0d607ac8.
+Preserve user ROMs/settings/saves when replacing the executable. Hardware
+performance remains unverified; next physical log should quantify the saved
+tile time and remaining CPU raster/geometry/ROM I/O bottlenecks.
+
+
 ## PSP per-stage and ROM I/O profiling (2026-10-01)
 
 The new physical test05 psp-diagnostic.log has 44 heartbeats and ends with

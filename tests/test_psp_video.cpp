@@ -137,6 +137,48 @@ int main() {
         for (int x = 0; x < 480; ++x)
             if (x < 58 || x >= 421)
                 require(video->screen()[size_t(y) * 480 + x] == 0xff000000u, "external mode letterbox bars");
+    // A tracked board must match untracked native output without rebuilding
+    // unchanged tiles. Palette/window/scroll state remains live in draw().
+    auto cached = std::make_unique<rt::Video>(memory.tiles.data(), memory.chars.data());
+    cached->enable_write_tracking();
+    auto compare_cache = [&](bool stretch) {
+        for (auto* v : {video.get(), cached.get()}) {
+            v->set_external_3d(false);
+            v->set_psp_stretch(stretch);
+            for (unsigned i = 0; i < 8192; ++i)
+                v->palette_w(i, memory.palette.data(), memory.translation.data());
+            v->frame_start();
+            v->screen_update({}, 0, {memory.palette.data(), memory.translation.data(), nullptr, nullptr, nullptr});
+        }
+        require(video->screen() == cached->screen(), "tracked cache pixels match full rebuild");
+    };
+    compare_cache(false);
+    require(cached->last_profile().tiles_rebuilt == 16384, "cold cache builds every tile");
+    compare_cache(false);
+    require(cached->last_profile().tiles_rebuilt == 0, "unchanged frame rebuilds no tiles");
+    const uint16_t first_tile = uint16_t(memory.tiles[0] | memory.tiles[1] << 8);
+    const unsigned code = first_tile & 0x3fff;
+    unsigned references = 0;
+    for (unsigned i = 0; i < 16384; ++i)
+        references += (uint16_t(memory.tiles[i * 2] | memory.tiles[i * 2 + 1] << 8) & 0x3fff) == code;
+    memory.chars[code * 32 + 31] ^= 0xf;
+    cached->character_memory_w(code * 32 + 31);
+    compare_cache(false);
+    require(cached->last_profile().tiles_rebuilt == references, "only tiles using changed glyph rebuilt");
+    memory.word(0, first_tile ^ 0x8000);
+    cached->tile_memory_w();
+    compare_cache(false);
+    require(cached->last_profile().tiles_rebuilt == 1, "category change rebuilds one tile");
+    memory.word(0x5000, 143);
+    memory.word(0x6000, 0xaaaa);
+    cached->tile_memory_w();
+    memory.palette[3] ^= 0x1f;
+    compare_cache(true);
+    require(cached->last_profile().tiles_rebuilt == 0, "scroll/window/palette/aspect do not decode glyphs");
+    memory.chars[0] ^= 0xf0;
+    cached->character_memory_w();
+    compare_cache(false);
+    require(cached->last_profile().tiles_rebuilt == 16384, "unknown character writes invalidate every glyph");
     psp_video_reference_destroy(reference);
     std::printf("PSP native Video: %llu pixels exact against reference center sampling; 128 scenes, both aspects, normal/split/window/line-scroll/category modes\n",
                 static_cast<unsigned long long>(compared));

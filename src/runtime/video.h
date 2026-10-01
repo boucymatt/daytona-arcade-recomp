@@ -34,7 +34,18 @@ public:
     void colorxlat_w(uint32_t offset) { if ((offset & 0xff) == 0x80 / 2) palette_dirty_ = true; }
     void enable_write_tracking() { write_tracking_ = true; }
     void tile_memory_w() { tile_memory_touched_ = true; }
-    void character_memory_w() { character_memory_touched_ = true; }
+    void character_memory_w(uint32_t offset = UINT32_MAX) {
+        character_memory_touched_ = true;
+#if defined(M2_PSP_NATIVE_VIDEO) && !defined(M2_VITA_RENDER_OPT)
+        if (offset == UINT32_MAX) psp_character_dirty_.fill(0xff);
+        else {
+            const auto code = (offset & 0x7ffff) / 32;
+            psp_character_dirty_[code / 8] |= uint8_t(1u << (code & 7));
+        }
+#else
+        (void)offset;
+#endif
+    }
     void xhout_w(uint16_t data) { crtc_x_ = 84 + int16_t(data); render_x_ = crtc_x_; }
     void xvout_w(uint16_t data) { crtc_y_ = 130 + int16_t(data); render_y_ = crtc_y_; }
 
@@ -227,6 +238,13 @@ private:
     std::array<uint16_t, OutputW> psp_window_bit_{};
     std::array<uint16_t, 5> psp_mask_boundaries_{};
 
+#endif
+#if defined(M2_PSP_NATIVE_VIDEO) && !defined(M2_VITA_RENDER_OPT)
+    // 34 KiB, not a character-RAM or composed-frame copy. Raw/untracked
+    // callers retain full rebuilds; board writes identify changed glyphs.
+    std::array<uint16_t, 4 * 4096> psp_tile_values_{};
+    std::array<uint8_t, 0x4000 / 8> psp_character_dirty_{};
+    bool psp_tiles_valid_ = false;
 #endif
     uint16_t tile(uint32_t i) const { return uint16_t(tile_ram_[i * 2] | tile_ram_[i * 2 + 1] << 8); }
     void build_layer(int layer); // pixmap_/flags_ for one tilemap

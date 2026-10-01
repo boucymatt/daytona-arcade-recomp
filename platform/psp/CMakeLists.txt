@@ -64,6 +64,13 @@ set(RUNTIME_SOURCES)
 foreach(name IN LISTS RUNTIME_FILES)
     list(APPEND RUNTIME_SOURCES "${DAYTONA_ROOT}/src/runtime/${name}.cpp")
 endforeach()
+# Keep generated game code size-focused, but optimize the measured pixel,
+# geometry, ROM-cache and sample loops for speed. IEEE/rounding flags above
+# remain in force; no fast-math or guest scheduling changes.
+foreach(hot_source video raster geo paged_rom native_sample_mixer native_sound_sequencer)
+    set_source_files_properties("${DAYTONA_ROOT}/src/runtime/${hot_source}.cpp"
+        PROPERTIES COMPILE_OPTIONS "-O3")
+endforeach()
 add_library(psp_runtime STATIC ${RUNTIME_SOURCES})
 target_include_directories(psp_runtime PUBLIC "${DAYTONA_ROOT}/src")
 target_compile_definitions(psp_runtime PUBLIC M2_LOW_MEMORY=1 M2_PSP_NATIVE_VIDEO=1)
