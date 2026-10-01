@@ -1,4 +1,5 @@
 #include "../platform/psp/rom_cache_policy.h"
+#include "../platform/psp/controls.h"
 // Opt-in real-ROM audit. Compares dense and bounded file-backed native boards
 // with the same generated code; no original code/assets are stored here.
 #include "runtime/game_loop.h"
@@ -64,7 +65,14 @@ rt::M2Board::Images images(const std::string &directory, bool paged) {
 }
 rt::Inputs input_for(unsigned frame, bool attract) {
     rt::Inputs in;
-    if (attract) return in;
+    if (attract) {
+        if (std::getenv("PSP_IDLE_INPUT")) {
+            const auto mapped = psp::Controls{}.sample({0, 120});
+            in.in0 = mapped.in0; in.in1 = mapped.in1; in.in2 = mapped.in2;
+            in.steer = mapped.steer; in.accel = mapped.accel; in.brake = mapped.brake;
+        }
+        return in;
+    }
     if ((frame >= 1200 && frame < 1210) || (frame >= 1240 && frame < 1250) ||
         (frame >= 1280 && frame < 1290)) in.in0 &= ~1;
     if ((frame >= 1400 && frame < 1410) || (frame >= 1600 && frame < 1610) ||

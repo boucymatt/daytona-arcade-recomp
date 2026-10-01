@@ -13,6 +13,7 @@
 // ground truth for the GPU renderer, checked against MAME frame by frame.
 // See THIRD_PARTY.md.
 #pragma once
+#include "runtime/render_trace.h"
 
 #include "runtime/geo.h"
 
@@ -37,6 +38,9 @@ struct VideoMem {
 class Raster {
 public:
     Raster();
+    void set_render_observer(RenderObserver observer, void* context) {
+        observer_ = observer; observer_context_ = context;
+    }
 #ifdef M2_PSP_NATIVE_VIDEO
     static constexpr int kStride = 480, kHeight = 272;
 #else
@@ -94,6 +98,11 @@ private:
     int hud_dx_ = 0;                           // HUD overlay move (0 = none)
     float hud_box_[4] = {0, 0, 0, 0};          // the condition box: x0, x1, y0, y1 (496-wide)
     uint16_t hud_z_ = 0;
+    RenderObserver observer_ = nullptr;
+    void* observer_context_ = nullptr;
+    void trace(const char* stage, size_t progress, size_t total) {
+        if (observer_) observer_(observer_context_, stage, progress, total);
+    }
 #ifdef M2_PSP_NATIVE_VIDEO
     bool psp_stretch_ = false;
     std::array<uint16_t, kStride> checker_x_{};

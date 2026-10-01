@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+#include <string>
 
 #ifndef M2_PSP_NATIVE_VIDEO
 #error This test requires the PSP native-resolution renderer.
@@ -163,5 +164,19 @@ int main() {
         checker_and_triangle(raster, memory, stretch);
         perspective_textures(raster, memory, stretch);
     }
+    for (unsigned invalid : {9u, 16u, 255u}) {
+        auto bad = full(); bad.num_vertices = uint8_t(invalid);
+        bool caught = false;
+        try { draw(raster, memory, {bad}); } catch (const rt::GeoFatal&) { caught = true; }
+        require(caught, "invalid vertex count rejected before indexing");
+    }
+    std::vector<std::string> events;
+    raster.set_render_observer([](void* context, const char* name, size_t, size_t) {
+        static_cast<std::vector<std::string>*>(context)->emplace_back(name);
+    }, &events);
+    draw(raster, memory, {full()});
+    require(events == std::vector<std::string>{"raster_clear_begin", "raster_order_begin",
+        "raster_sort_begin", "raster_draw_begin", "raster_batch", "raster_end"}, "raster trace order");
+    raster.set_render_observer(nullptr, nullptr);
     std::puts("PSP raster: native480x272, aspect/stretch, guest clipping, checker phase, triangles/quads and perspective textures passed");
 }

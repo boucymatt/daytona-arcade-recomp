@@ -27,6 +27,10 @@ public:
     // tile_ram: 0x01000000 (0x10000 bytes, u16 entries); char_ram: 0x01080000
     // (0x80000 bytes, u16 entries); both as the i960 wrote them.
     Video(const uint8_t *tile_ram, const uint8_t *char_ram);
+    void set_render_observer(RenderObserver observer, void* context) {
+        observer_ = observer; observer_context_ = context;
+        raster_.set_render_observer(observer, context);
+    }
 
     // Register writes (MAME handlers), fed by the bus as they happen.
     // palette_w after the bus has stored the write (palram holds the new value).
@@ -227,6 +231,11 @@ public:
 #endif
 
 private:
+    RenderObserver observer_ = nullptr;
+    void* observer_context_ = nullptr;
+    void trace(const char* stage, size_t total) {
+        if (observer_) observer_(observer_context_, stage, 0, total);
+    }
 #ifdef M2_PSP_NATIVE_VIDEO
     // Sample logical tile pixels directly at native output pixel centers.
     int output_x_boundary(int logical) const;

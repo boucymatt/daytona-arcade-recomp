@@ -80,9 +80,21 @@ void checkpoint(const char* label) {
     if (length > 0 && size_t(length) < sizeof(text))
         diagnostic_log.write(false, text, size_t(length));
 }
-void trace_stage(void*, rt::GameLoop::Stage stage, uint64_t frame, uint32_t pc, uint64_t instructions) {
+void trace_render(void*, const char* stage, size_t progress, size_t total) {
+    // Bounded detail only for the frame that failed on physical hardware.
+    if (!std::strcmp(stage, "raster_batch") && progress >= 8192) return;
+    char label[192];
+    std::snprintf(label, sizeof(label), "render_%s target_frame=211 progress=%lu polygons=%lu",
+                  stage, (unsigned long)progress, (unsigned long)total);
+    checkpoint(label);
+    if (diagnostic_log.error()) throw std::runtime_error("Render trace write failed");
+}
+void trace_stage(void* context, rt::GameLoop::Stage stage, uint64_t frame, uint32_t pc, uint64_t instructions) {
     if (!trace_window.active()) return;
     using S = rt::GameLoop::Stage;
+    auto* video = static_cast<rt::Video*>(context);
+    if (stage == S::VideoBegin) video->set_render_observer(frame == 211 ? trace_render : nullptr, nullptr);
+    if (stage == S::VideoEnd) video->set_render_observer(nullptr, nullptr);
     const char* name = "unknown";
     switch (stage) {
     case S::CoreBegin: name = "core_begin"; break;
@@ -472,7 +484,7 @@ int main() {
         targeted_trace = parsed && value == 2;
         std::fclose(enabled);
     }
-    checkpoint("test09_boot_before_callbacks");
+    checkpoint("test10_boot_before_callbacks");
     int callbacks = sceKernelCreateThread("daytona_callbacks", callback_thread, 0x11, 4096, PSP_THREAD_ATTR_USER, nullptr);
     if (callbacks >= 0 && sceKernelStartThread(callbacks, 0, nullptr) < 0) {
         sceKernelDeleteThread(callbacks); callbacks = -1;
@@ -504,7 +516,7 @@ int main() {
     int selection = 0;
     uint32_t held = 0;
     char message[192] = "Start loads your imported files from roms/.";
-    if (diagnostic_enabled) std::snprintf(message, sizeof(message), "Test09 profiling ON. Logs saved beside EBOOT.PBP.");
+    if (diagnostic_enabled) std::snprintf(message, sizeof(message), "Test10 profiling ON. Logs saved beside EBOOT.PBP.");
     if (diagnostic_log.error()) std::snprintf(message, sizeof(message), "Diagnostic path/write error: %08lx", (unsigned long)uint32_t(diagnostic_log.error()));
     const uint64_t boot_time = now_us();
     uint64_t deadline = boot_time;
@@ -533,7 +545,7 @@ int main() {
         auto loaded = psp::load_game("roms", diagnostic_enabled ? rom_io_event : nullptr, io_contexts);
         stage(display, "Creating native main board and CPU renderer");
         game = std::make_unique<rt::GameLoop>(std::move(loaded.images), false);
-        if (targeted_trace) game->set_stage_observer(trace_stage, nullptr);
+        if (targeted_trace) game->set_stage_observer(trace_stage, &game->board().video());
         if (smoke || diagnostic_enabled) {
             game->set_profile_clock(now_us);
             game->board().video().set_profile_clock(now_us);

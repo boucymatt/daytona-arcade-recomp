@@ -179,8 +179,10 @@ void Raster::render(const std::vector<GeoPoly> &polys, int windows, const VideoM
 #ifdef M2_VITA_RENDER_OPT
     for (auto &entry : shades_) entry.key = 0xffffffffu;
 #endif
+    trace("raster_clear_begin", 0, polys.size());
     std::fill(dest_.begin(), dest_.end(), 0u);
     std::fill(fill_.begin(), fill_.end(), u8(0));
+    trace("raster_order_begin", 0, polys.size());
     // MAME: for window = cur_window..0, for z = min_z..max_z, each bucket
     // newest first.
 #ifdef M2_VITA_RENDER_OPT
@@ -190,13 +192,19 @@ void Raster::render(const std::vector<GeoPoly> &polys, int windows, const VideoM
     std::vector<size_t> order(polys.size());
 #endif
     std::iota(order.begin(), order.end(), size_t(0));
+    trace("raster_sort_begin", 0, polys.size());
     std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
         if (polys[a].window != polys[b].window) return polys[a].window > polys[b].window;
         if (polys[a].z != polys[b].z) return polys[a].z < polys[b].z;
         return a > b;
     });
-    for (size_t i : order)
+    trace("raster_draw_begin", 0, polys.size());
+    for (size_t ordinal = 0; ordinal < order.size(); ++ordinal) {
+        if (observer_ && ordinal % 128 == 0) trace("raster_batch", ordinal, polys.size());
+        const size_t i = order[ordinal];
         if (polys[i].window <= windows) render_one(polys[i], crtc_x, crtc_y, render_x, render_y, clip_minx, clip_maxx, clip_miny, clip_maxy);
+    }
+    trace("raster_end", order.size(), polys.size());
 }
 
 int Raster::coverage_estimate(const std::vector<GeoPoly> &polys, int windows, int crtc_x, int crtc_y) const {
@@ -273,6 +281,7 @@ void Raster::render_one(GeoPoly poly, int crtc_x, int crtc_y, int render_x, int 
                         int clip_miny, int clip_maxy) {
     // Widescreen: a viewport spanning the screen extends into the side margins.
     const int wide = margin_ && poly.viewport[0] <= 0 && poly.viewport[2] >= 495 ? margin_ : 0;
+    if (poly.num_vertices > std::size(poly.v)) throw GeoFatal("raster vertex count exceeds storage");
     // model2_3d_project
     for (int i = 0; i < poly.num_vertices; i++) {
         GeoVertex &v = poly.v[i];
@@ -443,7 +452,7 @@ void Raster::render_triangle(const int *clip, int renderer, const Extra &o, cons
     const int32_t v3y = round_coordinate(v3->y);
     const int32_t v1yclip = std::max<int32_t>(v1y, clip[2]);
     const int32_t v3yclip = std::min<int32_t>(v3y, clip[3] + 1);
-    if (v3yclip - v1yclip <= 0) return;
+    if (v3yclip <= v1yclip) return;
 
     const float dxdy_v1v2 = (v2->y == v1->y) ? 0.0f : (v2->x - v1->x) / (v2->y - v1->y);
     const float dxdy_v1v3 = (v3->y == v1->y) ? 0.0f : (v3->x - v1->x) / (v3->y - v1->y);
@@ -496,7 +505,7 @@ void Raster::render_polygon(const int *clip, int renderer, const Extra &o, const
     const int32_t maxy = round_coordinate(v[maxv].y);
     const int32_t minyclip = std::max<int32_t>(miny, clip[2]);
     const int32_t maxyclip = std::min<int32_t>(maxy, clip[3] + 1);
-    if (maxyclip - minyclip <= 0) return;
+    if (maxyclip <= minyclip) return;
 
     struct poly_edge {
         const GeoVertex *v1 = nullptr, *v2 = nullptr;
@@ -514,6 +523,7 @@ void Raster::render_polygon(const int *clip, int renderer, const Extra &o, const
         for (int p = 0; p < 3; p++) edgeptr->dpdy[p] = (edgeptr->v2->p[p] - edgeptr->v1->p[p]) * ooy;
         ++edgeptr;
     }
+    const poly_edge* const fend = edgeptr;
     edgeptr = &bedgelist[0];
     for (int curv = minv; curv != maxv; curv = (curv == 0) ? (NumVerts - 1) : (curv - 1)) {
         edgeptr->v1 = &v[curv];
@@ -525,20 +535,30 @@ void Raster::render_polygon(const int *clip, int renderer, const Extra &o, const
         ++edgeptr;
     }
 
-    const poly_edge *ledge, *redge;
+    const poly_edge* const bend = edgeptr;
+    if (fend == fedgelist || bend == bedgelist) throw GeoFatal("raster empty edge chain");
+    const poly_edge *ledge, *redge, *lend, *rend;
     if ((fedgelist[0].v1 == bedgelist[0].v1 && fedgelist[0].dxdy < bedgelist[0].dxdy) ||
         (fedgelist[0].v1 != bedgelist[0].v1 && fedgelist[0].v1->x < bedgelist[0].v1->x)) {
         ledge = fedgelist;
         redge = bedgelist;
+        lend = fend; rend = bend;
     } else {
         ledge = bedgelist;
         redge = fedgelist;
+        lend = bend; rend = fend;
     }
 
     for (int32_t curscan = minyclip; curscan < maxyclip; curscan++) {
         const float fully = float(curscan) + 0.5f;
-        while (fully > ledge->v2->y && fully < v[maxv].y) ++ledge;
-        while (fully > redge->v2->y && fully < v[maxv].y) ++redge;
+        while (fully > ledge->v2->y && fully < v[maxv].y) {
+            if (ledge + 1 == lend) throw GeoFatal("raster left edge chain exhausted");
+            ++ledge;
+        }
+        while (fully > redge->v2->y && fully < v[maxv].y) {
+            if (redge + 1 == rend) throw GeoFatal("raster right edge chain exhausted");
+            ++redge;
+        }
         const float startx = ledge->v1->x + (fully - ledge->v1->y) * ledge->dxdy;
         const float stopx = redge->v1->x + (fully - redge->v1->y) * redge->dxdy;
         int32_t istartx = round_coordinate(startx), istopx = round_coordinate(stopx);

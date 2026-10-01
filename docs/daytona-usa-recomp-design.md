@@ -123,6 +123,14 @@ can delay the game and audio command timing; do not use that window as an FPS
 benchmark. They identify last main-thread progress, not the faulting thread,
 and sync still cannot guarantee recovery from a physical power loss. Marker1
 retains normal periodic profiling. Neither mode skips game instructions/frames.
+After physical test09 stopped between frame211 video begin/end, marker2 now
+adds owner-thread render checkpoints inside that frame only. These separate
+palette/tile work, raster allocation/sorting, batches of128sorted entries and
+composition. At most64batch checkpoints are persisted, with stage boundaries
+still recorded afterward. Raster guards fail visibly on oversized vertex
+counts or exhausted edge chains instead of accessing outside their storage;
+valid render equations/order remain unchanged. A last main-thread checkpoint
+does not identify a concurrent audio or hardware fault.
 
 Opt-in PSP performance diagnostics publish coherent completed-frame wall-time
 snapshots and per-ROM cache-miss seek/read counters. I/O observers run only on

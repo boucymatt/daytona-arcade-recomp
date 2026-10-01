@@ -789,10 +789,12 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
     uint64_t before = ticks();
     // Retain the reference's sticky palette-dirty behavior. palette_w marks
     // cached composition dirty only if the resulting RGB value really changed.
+    trace("palette_begin", polys.size());
     if (palette_dirty_) {
         for (uint32_t i = 0; i < 0x1000; i++) palette_w(i, mem.palram, mem.colorxlat);
         palette_dirty_ = false;
     }
+    trace("tile_cache_begin", polys.size());
 #ifdef M2_VITA_RENDER_OPT
     update_tile_cache();
 #elif defined(M2_PSP_NATIVE_VIDEO)
@@ -809,6 +811,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         ++system24_texture_generation_;
         system24_source_dirty_ = false;
     }
+    trace("tile_cache_end", polys.size());
     profile_.tile_cache = ticks() - before;
 #ifndef M2_VITA_RENDER_OPT
     if (external_3d_ && desktop_) {
@@ -933,6 +936,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         sys24_.assign(size_t(W) * (H + 4), 0u);
     }
 #endif
+    trace("background_begin", polys.size());
 #ifdef M2_PSP_NATIVE_VIDEO
     auto copy_trans = [&](const uint32_t *source, size_t stride) {
         for (int y = 0; y < OutputH; ++y)
@@ -1034,6 +1038,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         profile_.composite += ticks() - before;
     }
 #endif
+    trace("background_end", polys.size());
     rendered_now_ = false;
     if (external_3d_) {
         // Save the exact two System-24 layers separately. The Vita frontend
@@ -1078,10 +1083,11 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         const bool race_hud = raster_.find_race_hud(polys, crtc_x_ + margin_, crtc_y_);
         if (race_hud != hud_on_) { hud_on_ = race_hud; set_raster_hud_moves(); render_done_ = false; }
     }
+    trace("raster_begin", polys.size());
     if (!render_done_ && !polys.empty()) {
         before = ticks();
         raster_.render(polys, windows, mem, crtc_x_ + margin_, crtc_y_, render_x_ + margin_, render_y_, 0,
-                       width() - 1, 0, H - 1);
+                       W + 2 * margin_ - 1, 0, H - 1);
         profile_.raster = ticks() - before;
         if (margin_) { // widescreen: how much of the original screen the 3D layer covers
             size_t covered = 0;
@@ -1095,6 +1101,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         rendered_now_ = true;
     }
     before = ticks();
+    trace("composite_3d_begin", polys.size());
 #ifdef M2_PSP_NATIVE_VIDEO
     if (render_done_) copy_trans(raster_.pixels(), raster_.stride());
 #else
@@ -1105,6 +1112,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
     if (render_done_) copy_trans(raster_.pixels(), size_t(raster_.stride()), width());
 #endif
     profile_.composite += ticks() - before;
+    trace("foreground_begin", polys.size());
 #ifndef M2_VITA_RENDER_OPT
     if (!hud_edges) {
         before = ticks();
@@ -1114,6 +1122,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
     }
 #endif
     before = ticks();
+    trace("final_composite_begin", polys.size());
 #ifdef M2_PSP_NATIVE_VIDEO
     copy_trans(sys24_.data(), OutputW);
 #else
@@ -1133,6 +1142,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         std::fill(row + psp_left_ + psp_width_, row + OutputW, 0xff000000u);
     }
 #endif
+    trace("video_complete", polys.size());
 }
 
 // Widescreen, HUD at the edges: the race HUD's side groups (lap and lap
