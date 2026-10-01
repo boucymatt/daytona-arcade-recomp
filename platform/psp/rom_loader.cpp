@@ -1,4 +1,5 @@
 #include "rom_loader.h"
+#include "rom_cache_policy.h"
 #include "runtime/paged_rom.h"
 #include <cstdio>
 #include <stdexcept>
@@ -23,22 +24,23 @@ LoadedGame load_game(const std::string& directory, rt::PagedRom::IoObserver obse
                      const std::array<void*, 7>& contexts) {
     const auto path = [&](const char* name) { return directory + "/" + name + ".bin"; };
     size_t region = 0;
-    const auto paged = [&](const char* name, uint32_t bytes, size_t cache) {
-        auto image = std::make_shared<rt::PagedRom>(path(name), bytes, cache);
+    const auto paged = [&](const char* name, uint32_t bytes) {
+        const auto cache = kRomCaches.at(region);
+        auto image = std::make_shared<rt::PagedRom>(path(name), bytes, cache.bytes, cache.ways, true);
         image->set_io_observer(observer, contexts.at(region++));
         return image;
     };
     LoadedGame game;
     // Fixed 832 KiB main-board cache budget; logical ROM masks stay intact.
-    game.images.program_file = paged("program", 0x200000, 0x40000);
-    game.images.main_data_file = paged("main_data", 0x2000000, 0x20000);
-    game.images.copro_data_file = paged("copro_data", 0x800000, 0x10000);
-    game.images.polygons_file = paged("polygons", 0x1000000, 0x40000);
-    game.images.textures_file = paged("textures", 0x1000000, 0x20000);
+    game.images.program_file = paged("program", 0x200000);
+    game.images.main_data_file = paged("main_data", 0x2000000);
+    game.images.copro_data_file = paged("copro_data", 0x800000);
+    game.images.polygons_file = paged("polygons", 0x1000000);
+    game.images.textures_file = paged("textures", 0x1000000);
     game.images.copro_tables = resident(path("copro_tables"), 0x40000);
     // These two 256 KiB caches are exclusively used by the audio thread.
-    auto pcm1 = paged("pcm1", 0x400000, 0x40000);
-    auto pcm2 = paged("pcm2", 0x400000, 0x40000);
+    auto pcm1 = paged("pcm1", 0x400000);
+    auto pcm2 = paged("pcm2", 0x400000);
     game.audio = std::make_unique<snd::NativeSoundEngine>(
         resident(path("sound_program"), 0x40000), std::move(pcm1), std::move(pcm2));
     return game;

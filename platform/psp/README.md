@@ -80,6 +80,29 @@ reduced main-board reads in a 6,000-frame host race from 3.623 GB to 1.461 GB,
 not to zero. Those numbers include startup, omit audio ROM traffic, and are
 not hardware throughput measurements.
 
+## Test08 ROM I/O optimization and shutdown investigation
+
+Test07 hardware feedback reports an abrupt shutdown at frame 210, without a
+shutdown checkpoint. The cause is unresolved; no recorded ROM I/O error,
+stack exhaustion or heap exhaustion identifies it. Do not treat emulator
+completion as a hardware crash fix.
+
+Test08 redistributes the same 832 KiB main-board cache toward textures and tunes
+associativity per region. A 6,000-frame race reads 971,177,984 bytes versus
+1,460,916,224 before (33.52% less), with identical pixels and game state.
+Audio caches remain 512 KiB. Sequential cache misses avoid seeks only when the
+file is already at the exact requested offset. Errors still invalidate pages
+and fail visibly. Desktop/Vita defaults remain unchanged.
+
+Routine diagnostic heartbeats still write and close, but no longer force a
+whole-device sync each second during game/audio ROM reads. Startup, stall and
+shutdown records retain sync. The last heartbeat can be lost on power loss.
+This reduces storage interference; it does not establish the shutdown cause.
+The 32 MB emulator completed 1,200 frames with no reported runtime failure;
+the 6,000-frame host replay passed with instrumented runtime memory checks.
+These do not reproduce or rule out the physical shutdown. Back up saves before
+hardware testing and stop the run if instability recurs.
+
 ## Test07 tile-cache optimization
 
 The PSP CPU renderer now retains decoded tiles and rebuilds only changed tile

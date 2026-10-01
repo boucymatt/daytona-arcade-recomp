@@ -320,7 +320,8 @@ private:
             if (diagnostic_enabled && !periodic_failed && snapshot.active() &&
                 uint32_t(now - last_record) >= 1'000'000) {
                 periodic_failed = !record(snapshot, now, 0, false);
-                // Sync time counts as logging overhead, not another due record.
+                // Write/close time counts as overhead, not another due record.
+                // Heartbeats do not force a whole-device sync during ROM reads.
                 last_record = sceKernelGetSystemTimeLow();
             }
             const int delayed = sceKernelDelayThread(250000);
@@ -400,7 +401,7 @@ private:
             append("\n");
             if (length < 0) { error_ = uint32_t(-1); return false; }
         }
-        const bool ok = diagnostic_log.write(stall, text, size_t(length));
+        const bool ok = diagnostic_log.write(stall, text, size_t(length), stall);
         if (!ok) error_ = uint32_t(diagnostic_log.error());
         return ok;
     }
@@ -449,7 +450,7 @@ int main() {
         diagnostic_enabled = std::fscanf(enabled, "%d", &value) == 1 && value == 1;
         std::fclose(enabled);
     }
-    checkpoint("test07_boot_before_callbacks");
+    checkpoint("test08_boot_before_callbacks");
     int callbacks = sceKernelCreateThread("daytona_callbacks", callback_thread, 0x11, 4096, PSP_THREAD_ATTR_USER, nullptr);
     if (callbacks >= 0 && sceKernelStartThread(callbacks, 0, nullptr) < 0) {
         sceKernelDeleteThread(callbacks); callbacks = -1;
@@ -481,7 +482,7 @@ int main() {
     int selection = 0;
     uint32_t held = 0;
     char message[192] = "Start loads your imported files from roms/.";
-    if (diagnostic_enabled) std::snprintf(message, sizeof(message), "Test07 profiling ON. Logs saved beside EBOOT.PBP.");
+    if (diagnostic_enabled) std::snprintf(message, sizeof(message), "Test08 profiling ON. Logs saved beside EBOOT.PBP.");
     if (diagnostic_log.error()) std::snprintf(message, sizeof(message), "Diagnostic path/write error: %08lx", (unsigned long)uint32_t(diagnostic_log.error()));
     const uint64_t boot_time = now_us();
     uint64_t deadline = boot_time;

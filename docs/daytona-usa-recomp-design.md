@@ -105,8 +105,12 @@ threads. A separate opt-in diagnostic mode persists startup checkpoints before
 graphics/gameplay and one-second active-game snapshots. Native file paths are
 made absolute from checked main-thread getcwd before workers start; newlib's
 cwd expansion does not apply to worker sceIoOpen calls. The bounded append-only
-records use checked close/device-sync, but cannot guarantee recovery from
-physical power loss. Main serializes checkpoint writes with observer start/join
+records use checked close; startup, fault and shutdown records additionally
+request device-sync. Routine heartbeats no longer force whole-device syncs
+while main/audio ROM reads are active. The final buffered heartbeat can be lost
+on sudden shutdown; even explicit sync cannot guarantee recovery from physical
+power loss. This reduces diagnostic I/O interference, not a proven crash fix.
+Main serializes checkpoint writes with observer start/join
 and publishes heap samples; the observer never inspects live game/heap state.
 Audio teardown must also retain the engine and SRC buffers if a kernel join
 fails, until the worker publishes that its final object access has completed.
@@ -120,8 +124,14 @@ instructions, caches, audio commands or output pixels.
 
 The PSP-1000 target explicitly requests normal memory (SFO MEMSIZE=0). Large
 immutable ROMs use checked, file-backed 4 KiB caches without changing logical
-sizes/address masks: 832 KiB for the main board, 512 KiB for audio. Mutable
-board RAM stays resident. M2_LOW_MEMORY selects a sparse page table and lazy
+sizes/address masks: 832 KiB for the main board, 512 KiB for audio. The PSP
+main cache allocation is program 128 / main 128 / copro 64 / polygons 256 /
+textures 256 KiB, with 4/16/8/16/4 ways respectively. Audio retains two 256 KiB
+four-way caches.
+The default non-PSP cache policy stays four-way. PSP skips redundant seeks only
+when an exclusive file owner's last successful full read ended at the exact
+requested offset; failed or short reads invalidate that position and cache tag.
+Mutable board RAM stays resident. M2_LOW_MEMORY selects a sparse page table and lazy
 allocation of unused external-GPU layer buffers; desktop and Vita defaults
 remain dense. SD/Memory Stick caching is not expanded physical RAM or firmware
 swap. I/O errors fail visibly instead of supplying dummy ROM data.

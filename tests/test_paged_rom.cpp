@@ -56,8 +56,10 @@ template<class F> void fails(F &&f) {
 
 int main() {
     Fixture fixture;
+    for (bool sequential : {false, true})
+    for (unsigned ways : {1u, 2u, 4u, 8u, 16u, 64u})
     for (size_t cache : {size_t(4096), size_t(8192), size_t(12288), size_t(16384)}) {
-        rt::PagedRom rom(fixture.path, uint32_t(fixture.bytes.size()), cache);
+        rt::PagedRom rom(fixture.path, uint32_t(fixture.bytes.size()), cache, ways, sequential);
         assert(rom.size() == fixture.bytes.size() && rom.cache_bytes() == cache);
         for (unsigned cycle = 0; cycle < 3; ++cycle) {
             for (uint32_t address = 0; address < fixture.bytes.size() * 2; ++address) {
@@ -93,6 +95,17 @@ int main() {
         rom.set_io_observer(nullptr, nullptr);
         assert(rom.read8(4096) == fixture.bytes[4096] && events.count == 4);
     }
+    {
+        Events events;
+        rt::PagedRom rom(fixture.path, 16384, 4096, 4, true);
+        rom.set_io_observer(Events::collect, &events);
+        assert(rom.read8(0) == fixture.bytes[0] && events.count == 4);
+        assert(rom.read8(4096) == fixture.bytes[4096] && events.count == 6);
+        assert(events.values[4] == Events::E::ReadBegin && events.values[5] == Events::E::ReadEnd);
+        assert(rom.read8(8192) == fixture.bytes[8192] && events.count == 8);
+        assert(rom.read8(0) == fixture.bytes[0] && events.count == 12);
+    }
+    fails([&] { rt::PagedRom r(fixture.path, 16384, 4096, 0); });
     uint32_t writable[4]{};
     rt::GeoPtr ram{writable, 4, 5};
     ram.write(0x12345678);
@@ -103,16 +116,18 @@ int main() {
     fails([&] { rt::PagedRom r(fixture.path, 16384, 4097); });
     fails([&] { rt::PagedRom r(fixture.path, 16384, 32768); });
     fails([&] { rt::PagedRom r(fixture.path + ".missing", 16384, 4096); });
-    {
+    for (bool sequential : {false, true}) {
         Events events;
-        rt::PagedRom rom(fixture.path, 16384, 4096);
+        Fixture shortened;
+        rt::PagedRom rom(shortened.path, 16384, 4096, 4, sequential);
         assert(rom.read8(0) == fixture.bytes[0]);
         rom.set_io_observer(Events::collect, &events);
-        assert(truncate(fixture.path.c_str(), 17) == 0);
+        assert(truncate(shortened.path.c_str(), 17) == 0);
         fails([&] { (void)rom.read32(4096); });
         fails([&] { (void)rom.read32(4096); });
-        assert(events.count == 8 && events.values[3] == Events::E::ReadFailed &&
-               events.values[7] == Events::E::ReadFailed);
+        assert(events.count == (sequential ? 6u : 8u));
+        assert(events.values[sequential ? 1 : 3] == Events::E::ReadFailed &&
+               events.values[events.count - 1] == Events::E::ReadFailed);
         // A failed eviction invalidated the old tag. This must re-read and
         // reject the truncated page, not return stale or half-written bytes.
         fails([&] { (void)rom.read8(0); });
