@@ -1,5 +1,96 @@
 # Handoff
 
+## PSP render-freeze scheduling guard (2026-10-01)
+
+A new report says 3D freezes while audio continues. No new device log was
+provided. The reported test03 build put audio at priority 0x12 above main at
+0x20, with no explicit wait in its successful output loop. The SRC call can return
+without blocking when its queue is empty: see PPSSPP v1.20.4
+[__AudioEnqueue](https://github.com/hrydgard/ppsspp/blob/v1.20.4/Core/HLE/__sceAudio.cpp#L176-L206).
+If mixing takes longer than the 10.667 ms block, relying on that call alone
+can leave audio continuously runnable and starve main. This is a concrete
+scheduling weakness consistent with the symptom, not proof of the reported
+hardware root cause.
+
+The PSP worker now requests a real timed wait after every successful output:
+max(250, 1000 - output_call_elapsed) microseconds for short calls, 250 otherwise.
+The first proposed guard only delayed calls shorter than 1 ms; review rejected
+that as insufficient because elapsed API time is not proof of scheduler wait.
+A 100-us floor was also considered; PPSSPP clamps sub-200-us thread waits to
+210 us, so the explicit floor is 250 us. Actual wake time may be later.
+Output-call duration, yield count and requested delay are published atomically.
+Delay failure becomes a visible audio fault instead of a new tight loop. No
+samples, commands, geometry updates or game frames are discarded.
+
+A small PSP-only observer checks main progress every 250 ms, reports once after
+five seconds without progress in an active game, and re-arms after recovery.
+It records phase, completed frame/fresh-raster counts, kernel thread status and
+audio counters to psp-stall.log through native file I/O. It does not inspect
+live game/heap objects, touch GU, terminate a thread or alter game state.
+Loading and paused menus are excluded; ordinary per-frame file logging stays
+off. Observer setup/cleanup is checked and its storage lives through join.
+
+Fresh read-only native 480x272 host checks rendered all 6,000 attract and all 6,000
+race frames, comparing every dense/paged framebuffer exactly. Attract digest
+cb3350b14d1395db, final a60acc6de958dac5, 153,628,673 i960/143,436,167 TGP
+instructions. Race digest 14c33947133a8f6c, final de73b6f16dd18f81,
+196,665,345 i960/223,429,779 TGP instructions. Neither froze. The 600-frame
+hash remains a5103ec1c6a9f12d. This does not prove physical PSP stability.
+
+The ROM cache audit found no dangling transient page pointers; accesses return
+values before subsequent eviction. Audio/main cache ownership is independent.
+Raster output loops are bounded at 480x272, and finite edge walks terminate at
+the maximum-y vertex. Polygon capacity reaches 4096 before frame 600 and later
+maxima remain below it, so that later growth hypothesis was not supported.
+An uncapped direct-data sentinel loop on corrupted geometry input was noted,
+but no corrupted input or hang was reproduced; no speculative raster/geometry
+changes were made.
+
+GU audit at the pinned public PSPSDK found commands and sceGuGetMemory vertices
+already use the uncached list alias. Texture uploads use uncached VRAM and
+TexFlush. No missing flush was established; GU presents one fully composed CPU
+image, so it cannot selectively stall 3D while its HUD continues animating.
+The watchdog detects main progress stalls, not an unchanged picture when all
+main phases still advance.
+
+Validation: 29 CTests passed and two optional Lua tests skipped.
+Audio tests pass optimized, ASan/UBSan and ThreadSanitizer, including a 12-ms
+mixer, immediate/partial/normal/slow-nonblocking SRC, timer rollover, delay
+errors, sample order and buffer lifetime. Progress tests cover five-second
+threshold, one report per incident, recovery, inactive modes and timer wrap.
+A fresh unmodified test03 emulator baseline completed 1,800 frames without
+freezing, with status=ok in 576.979 seconds, hash e4ce88e5c42f597a. A fresh
+native host replay of all 1,800 frames matches that hash, digest
+9c9fb47dad176da6, 56,372,225 i960/50,380,430 TGP instructions. Therefore the
+reported device freeze was not reproduced; do not call it proven fixed.
+
+Test04 builds to a 4,530,490-byte EBOOT, SHA256
+f0313757ce008ac0d23c7fa7cc2d70cd7ac631e210fd4663bb83682429ce5a5b.
+Private install folder: build/psp-test04/PSP/GAME/DAYTONA, verified ROM import,
+no smoke files. Existing installs can replace only EBOOT.PBP and retain ROMs,
+settings and saves. Native 480x272 output, normal 32 MB PSP memory and
+333/166 MHz clocks remain unchanged; desktop/Vita runtime sources were not
+modified.
+
+Final test04 PPSSPPSDL original-PSP smoke completed 600 frames with every frame
+presented, status=ok, hash a5103ec1c6a9f12d and 419 fresh 3D updates. It took
+182.408 seconds versus 182.104 seconds at frame600 in the corresponding
+unmodified every-frame-presentation baseline: no performance improvement is
+claimed. It submitted 16,714 audio blocks with 16,713 explicit yields (final
+shutdown block needs no yield), no audio errors/invalid/unsupported commands,
+and available watchdog with zero errors/incidents. The emulator still reports
+underruns and 335 late blocks (peak 82.401 ms); this is not smooth playback.
+Heap used/free: 16,942,248/770,648 bytes; kernel free: 1,290,240 bytes, exactly
+16 KiB below the old smoke due to the bounded observer stack. No psp-stall.log
+was produced during healthy progress. Result/progress archives are in
+build/psp-emulator/smoke-{result,progress}-freeze-test04-600.txt; the inspected
+480x272 3D capture is build/psp-emulator/freeze-test04-3d.png.
+
+Next: physical PSP retest of test04, then inspect fault/stall records if the
+freeze persists. Keep the distinction between an actual stalled main thread
+and unchanged 3D while the game/HUD still advance. No hardware fix or smooth
+playback claim is justified by these emulator results alone.
+
 ## PSP native 480x272 rendering (2026-10-01)
 
 The PSP-only M2_PSP_NATIVE_VIDEO build now rasterizes geometry and composes

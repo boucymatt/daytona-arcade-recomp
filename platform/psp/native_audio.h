@@ -20,6 +20,7 @@ public:
         uint32_t blocks = 0, frames = 0, queued = 0, overflows = 0;
         uint32_t failed = 0, system_error = 0, invalid = 0, unsupported = 0;
         uint32_t notes = 0, voices = 0, render_us = 0, peak_render_us = 0, late_blocks = 0;
+        uint32_t output_call_us = 0, fairness_yields = 0, fairness_delay_us = 0;
     };
     NativeAudio() = default;
     NativeAudio(const NativeAudio&) = delete;
@@ -33,6 +34,7 @@ public:
         engine_ = std::move(engine);
         read_ = write_ = blocks_ = frames_ = overflows_ = failed_ = system_error_ = 0;
         invalid_ = unsupported_ = notes_ = voices_ = render_us_ = peak_render_us_ = late_blocks_ = 0;
+        output_call_us_ = fairness_yields_ = fairness_delay_us_ = 0;
         return true; // Paused until game entry.
     }
     bool resume() {
@@ -102,6 +104,8 @@ public:
         s.invalid = invalid_.load(); s.unsupported = unsupported_.load();
         s.notes = notes_.load(); s.voices = voices_.load();
         s.render_us = render_us_.load(); s.peak_render_us = peak_render_us_.load(); s.late_blocks = late_blocks_.load();
+        s.output_call_us = output_call_us_.load(); s.fairness_yields = fairness_yields_.load();
+        s.fairness_delay_us = fairness_delay_us_.load();
         return s;
     }
 private:
@@ -118,6 +122,7 @@ private:
     std::atomic<uint32_t> blocks_{0}, frames_{0}, overflows_{0}, failed_{0}, system_error_{0};
     std::atomic<uint32_t> invalid_{0}, unsupported_{0}, notes_{0}, voices_{0};
     std::atomic<uint32_t> render_us_{0}, peak_render_us_{0}, late_blocks_{0};
+    std::atomic<uint32_t> output_call_us_{0}, fairness_yields_{0}, fairness_delay_us_{0};
 
     void receive() {
         uint32_t r = read_.load(std::memory_order_relaxed);
@@ -157,10 +162,33 @@ private:
             peak_render_us_.store(std::max(peak_render_us_.load(), elapsed));
             if (elapsed > 10667) late_blocks_.fetch_add(1);
             sceKernelDcacheWritebackRange(out.data(), unsigned(out.size() * sizeof(int16_t)));
+            const uint32_t output_begin = sceKernelGetSystemTimeLow();
             const int result = sceAudioSRCOutputBlocking(PSP_AUDIO_VOLUME_MAX, out.data());
+            const uint32_t output_elapsed = sceKernelGetSystemTimeLow() - output_begin;
+            output_call_us_.store(output_elapsed);
+            fairness_delay_us_.store(0);
             if (result < 0) { system_error_.store(uint32_t(result)); failed_.store(1); break; }
             blocks_.fetch_add(1); frames_.fetch_add(kFrames);
             index ^= 1;
+            // SRC can return immediately after an underrun. If mixing then
+            // takes longer than one audio block, this higher-priority thread
+            // could remain continuously ready and starve the game thread.
+            // Call wall time includes kernel work/preemption, not just sleep.
+            // Always request a real scheduler wait; ask for a longer window
+            // after short calls. Preserve every generated sample, at the cost
+            // of 250..1000us requested wait per block (actual wake may be later).
+            // Unsigned subtraction handles the system timer's 32-bit rollover.
+            constexpr uint32_t kSchedulerWindowUs = 1000, kMinimumYieldUs = 250;
+            if (!stop_.load(std::memory_order_acquire)) {
+                const uint32_t delay = output_elapsed < kSchedulerWindowUs ?
+                    std::max(kMinimumYieldUs, kSchedulerWindowUs - output_elapsed) : kMinimumYieldUs;
+                fairness_delay_us_.store(delay);
+                fairness_yields_.fetch_add(1);
+                const int wait_result = sceKernelDelayThread(delay);
+                if (wait_result < 0) {
+                    system_error_.store(uint32_t(wait_result)); failed_.store(1); break;
+                }
+            }
         }
         return 0;
     }
