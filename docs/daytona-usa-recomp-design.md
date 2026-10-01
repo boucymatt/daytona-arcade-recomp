@@ -99,8 +99,17 @@ block: an empty SRC queue can make the nominally blocking call return without
 sleeping. Measuring call duration alone cannot prove that main got CPU time.
 The requested wait is 250-1000 microseconds, with no dropped audio samples,
 game frames or guest timing changes. A separate observer reads only published
-atomic progress and kernel thread status; it writes a fault-only stall record
-after five seconds without main progress, never drawing or restarting threads.
+atomic progress and kernel thread status; by default it writes only a fault
+record after five seconds without main progress, never drawing or restarting
+threads. A separate opt-in diagnostic mode persists startup checkpoints before
+graphics/gameplay and one-second active-game snapshots. Native file paths are
+made absolute from checked main-thread getcwd before workers start; newlib's
+cwd expansion does not apply to worker sceIoOpen calls. The bounded append-only
+records use checked close/device-sync, but cannot guarantee recovery from
+physical power loss. Main serializes checkpoint writes with observer start/join
+and publishes heap samples; the observer never inspects live game/heap state.
+Audio teardown must also retain the engine and SRC buffers if a kernel join
+fails, until the worker publishes that its final object access has completed.
 
 The PSP-1000 target explicitly requests normal memory (SFO MEMSIZE=0). Large
 immutable ROMs use checked, file-backed 4 KiB caches without changing logical

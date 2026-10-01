@@ -1,5 +1,105 @@
 # Handoff
 
+## PSP shutdown evidence capture (2026-10-01)
+
+Physical feedback supersedes test04's emulator success: gameplay began, then
+the PSP powered off before a log appeared. Stop using test04. The physical
+shutdown cause remains unconfirmed; test05 is a diagnostic build, not a
+hardware stability/performance claim. Work stays on psp-native-frontend.
+Desktop/Vita rendering and native audio are unchanged.
+
+Concrete logging defect: the old observer called native
+sceIoOpen("psp-stall.log") with a relative path. PSPSDK newlib _open expands its
+global cwd through __path_absolute, but direct native worker I/O does not.
+PPSSPP v1.20.4 MetaFileSystem.cpp tracks kernel cwd per thread and returns
+0x8002032c when a new worker has none. The healthy test04 smoke never called
+the error-only writer, so its watchdog_error=0 did not validate the path.
+Additionally, a five-second stall detector cannot capture an earlier poweroff.
+
+Test05 captures checked main getcwd before workers start and builds absolute
+native diagnostic/stall paths. The fixed-storage helper handles short writes,
+zero progress, negative native errors, seek/close/sync failures and a 2 MiB
+per-file cap. Writes append, close and sync the device; prior records are never
+truncated. Atomic error/record counters are safe for concurrent observation.
+This improves capture, not physical power-loss atomicity or filesystem safety.
+
+The opt-in psp-diagnostics.txt marker containing 1 enables startup checkpoints
+before callbacks, graphics, ROM load, board/audio setup and the first game
+frame, then approximately one-second active-game snapshots. Main is the sole
+writer while the observer is stopped, and joins it before load/reset/fault/
+shutdown checkpoints. Caught error text is saved before audio teardown. The
+observer uses published progress/audio/heap atomics and kernel thread/status/
+stack-fill queries, never live game/renderer/heap access or GU calls.
+Heap samples include their main-frame index. Main publishes the audio worker
+ID; observers do not read Audio's non-atomic lifecycle fields. Diagnostic
+path/write/sync/observer failures refuse or stop gameplay, retaining the logs.
+Normal releases omit the marker and retain only the fault-only observer.
+Sync overhead makes diagnostic runs unsuitable as performance benchmarks.
+
+A separate concrete latent lifetime defect was hardened: Audio::pause ignored
+kernel join/delete results. A failed join now keeps SRC/engine state until a
+worker-finished atomic, published after the last object access. A failed
+deletion retains the ID and rejects reopening until cleanup succeeds. No
+forced termination or premature object destruction is used; a truly stuck
+worker can still wait indefinitely. This failure path was reproduced in host
+tests, not in the reported device poweroff.
+
+Rejected/unproven hypotheses: actual test04 MIPS frames were 21,224 B main
+(256 KiB stack), 16,400 B loading NV helper, 4,176 B Video draw, at most 440 B
+raster, at most 48 B generated chunks/TGP, 96 B audio entry plus at most 168 B
+audio helpers (128 KiB stack), and 1,824 B observer record (16 KiB stack).
+Generated guest calls are state updates/tail dispatch, not growing native
+recursion. Linked _sbrk is bounded in a separately allocated kernel heap block;
+it does not grow into stacks. Linked newlib has real lwmutex malloc/FILE locks
+and pthread glue initialization, not dummy locks. Distinct PCM files/caches are
+worker-owned. The global reent pointer alone is not evidence of corruption.
+The two static 2048 B SRC buffers are 64 B aligned and written back before
+submission. GU commands/vertices use SDK uncached aliases; the 1,081,344 B
+VRAM allocation and small draw list are within bounds. None of these static
+checks proves absence of runtime corruption. No clock increase, RAM patch,
+kernel-mode exception handler or firmware change was used.
+
+Validation:
+- Diagnostic-log tests: absolute worker paths, malformed/long cwd, short/zero/
+  negative writes, failure preservation, append cap, seek/close/sync errors,
+  and concurrent counter reads. Optimized, ASan/UBSan and TSan pass.
+- Audio tests: join failure while a worker remains inside render, pause and
+  close retention, wait failure, failed deletion/retry; optimized, ASan/UBSan
+  and TSan pass. Normal scheduling/audio test cases remain green.
+- CTest: 30 passed, 2 optional Lua tests skipped. PSP cross-build passes.
+- Deliberate first-frame 6000 ms main delay (smoke.txt: 60 0 6000) in
+  PPSSPPSDL original-PSP mode saved startup/periodic records and exactly one
+  stall while audio continued: stalled_us=5052226, frames=0, audio_blocks=499.
+  The run recovered and completed 60 frames with no audio/log errors.
+  Native writer/sync succeeded, not merely compiled. This does not simulate
+  physical card power-loss durability. Archived *test05-injected* logs in
+  build/psp-emulator retain the evidence.
+- Marker-off forced-stall retest: 60 frames completed, exactly one native
+  stall record, no psp-diagnostic.log, diagnostic_enabled=0, errors=0. This
+  checks the normal fault-only path separately from proactive mode.
+- Final test05 original-PSP/32 MB emulator run: 600 frames / 419 fresh3D in
+  182.617794 s, expected native hash a5103ec1c6a9f12d, 16,711 audio blocks,
+  zero audio/log errors and no stall incidents. 190 journal records before
+  shutdown plus two shutdown checkpoints. Final heap used/free:
+  16,942,248/767,320 B; kernel free after audio pause: 1,290,240 B.
+  Active stack-fill free estimates: main 234,624/262,144 B, audio
+  130,028/131,072 B, observer 12,740/16,384 B. Native 480x272 capture inspected
+  at build/psp-emulator/test05-3d.png. 349 over-budget audio blocks and roughly
+  3.29 game frames/s remain; neither full speed nor hardware safety is proved.
+
+Private diagnostic install: build/psp-test05/PSP/GAME/DAYTONA, verified ROM
+import, diagnostic marker included, no smoke.txt or existing user saves.
+build/psp-test05-update.zip contains only EBOOT.PBP, the marker and diagnostic
+instructions; copying it must retain the existing ROMs/settings/cabinet saves.
+EBOOT: 4,537,650 bytes, SHA256
+32cb8f31766f6bb570f869d7bdbef1f64000e05e8f419cfa9e6c2a9a865f4247.
+
+Next: inspect physical test05 startup/last heartbeat and any stall/fault record
+before changing renderer, mixer, memory limits or clocks. If a physical unit
+powers off again, do not repeatedly retry the build. Full hardware stability
+and smooth PSP-1000 gameplay remain unresolved.
+
+
 ## PSP render-freeze scheduling guard (2026-10-01)
 
 A new report says 3D freezes while audio continues. No new device log was

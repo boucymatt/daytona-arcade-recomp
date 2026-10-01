@@ -30,7 +30,7 @@ public:
     // Main owns lifecycle; only the worker touches the engine while running.
     bool open(std::unique_ptr<Engine> engine) {
         close();
-        if (!engine || reserved_) return false;
+        if (!engine || reserved_ || thread_ >= 0) return false;
         engine_ = std::move(engine);
         read_ = write_ = blocks_ = frames_ = overflows_ = failed_ = system_error_ = 0;
         invalid_ = unsupported_ = notes_ = voices_ = render_us_ = peak_render_us_ = late_blocks_ = 0;
@@ -44,14 +44,18 @@ public:
         if (result < 0) { system_error_ = uint32_t(result); return false; }
         reserved_ = true;
         stop_.store(0, std::memory_order_release);
+        worker_finished_.store(0, std::memory_order_release);
         thread_ = sceKernelCreateThread("daytona_audio", entry, 0x12, 128 * 1024,
                                        PSP_THREAD_ATTR_USER | PSP_THREAD_ATTR_VFPU, nullptr);
-        if (thread_ < 0) { system_error_ = uint32_t(thread_); pause(); return false; }
+        if (thread_ < 0) {
+            worker_finished_.store(1, std::memory_order_release);
+            system_error_ = uint32_t(thread_); pause(); return false;
+        }
         auto* self = this;
         result = sceKernelStartThread(thread_, sizeof(self), &self);
         if (result < 0) {
             system_error_ = uint32_t(result);
-            sceKernelDeleteThread(thread_); thread_ = -1;
+            worker_finished_.store(1, std::memory_order_release);
             pause(); return false;
         }
         return true;
@@ -59,9 +63,24 @@ public:
     void pause() {
         stop_.store(1, std::memory_order_release);
         if (thread_ >= 0) {
-            // Never terminate a thread inside a ROM read or mixer call.
-            sceKernelWaitThreadEnd(thread_, nullptr);
-            sceKernelDeleteThread(thread_); thread_ = -1;
+            // Never terminate a thread inside a ROM read or mixer call. A
+            // failed kernel join is not permission to destroy its engine.
+            const int joined = sceKernelWaitThreadEnd(thread_, nullptr);
+            if (joined < 0) {
+                lifecycle_error(joined);
+                // The worker publishes completion after its final access to
+                // this object. Retain all state until then, even if waiting
+                // itself fails; a stuck kernel is safer than a live-worker UAF.
+                while (!worker_finished_.load(std::memory_order_acquire)) {
+                    const int waited = sceKernelDelayThread(1000);
+                    if (waited < 0) lifecycle_error(waited);
+                }
+            } else {
+                worker_finished_.store(1, std::memory_order_release);
+            }
+            const int deleted = sceKernelDeleteThread(thread_);
+            if (deleted < 0) lifecycle_error(deleted);
+            else thread_ = -1; // Keep a failed-to-delete ID for later cleanup.
         }
         if (reserved_) {
             // Both fixed output buffers remain owned here throughout release.
@@ -81,6 +100,8 @@ public:
     }
     void close() { pause(); engine_.reset(); }
     bool available() const { return engine_ != nullptr; }
+    // Lifecycle-owner thread only. Publish a snapshot separately to observers.
+    SceUID worker_thread() const { return thread_; }
     void volume(unsigned percent) { gain_.store(std::min(percent, 100u), std::memory_order_relaxed); }
     void mute(bool value) { muted_.store(value, std::memory_order_relaxed); }
     bool send(const uint8_t* data, size_t count) {
@@ -118,12 +139,17 @@ private:
     // even an unrecoverable release failure and are never freed by close().
     alignas(64) inline static std::array<std::array<int16_t, kFrames * 2>, 2> output_{};
     std::array<float, kFrames * 2> mix_{};
-    std::atomic<uint32_t> read_{0}, write_{0}, stop_{1}, gain_{80}, muted_{0};
+    std::atomic<uint32_t> read_{0}, write_{0}, stop_{1}, worker_finished_{1}, gain_{80}, muted_{0};
     std::atomic<uint32_t> blocks_{0}, frames_{0}, overflows_{0}, failed_{0}, system_error_{0};
     std::atomic<uint32_t> invalid_{0}, unsupported_{0}, notes_{0}, voices_{0};
     std::atomic<uint32_t> render_us_{0}, peak_render_us_{0}, late_blocks_{0};
     std::atomic<uint32_t> output_call_us_{0}, fairness_yields_{0}, fairness_delay_us_{0};
 
+    void lifecycle_error(int error) {
+        uint32_t expected = 0;
+        system_error_.compare_exchange_strong(expected, uint32_t(error));
+        failed_.store(1, std::memory_order_release);
+    }
     void receive() {
         uint32_t r = read_.load(std::memory_order_relaxed);
         const uint32_t w = write_.load(std::memory_order_acquire);
@@ -137,7 +163,11 @@ private:
     }
     static int entry(SceSize, void* argument) {
         auto* self = *static_cast<NativeAudio**>(argument);
-        return self->run();
+        const int result = self->run();
+        // Final object access: failed-join teardown may proceed after this
+        // release, even if the kernel has not marked the thread dormant yet.
+        self->worker_finished_.store(1, std::memory_order_release);
+        return result;
     }
     int run() noexcept {
         unsigned index = 0;

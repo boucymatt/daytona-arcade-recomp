@@ -128,13 +128,46 @@ can starve the game. All samples and game updates are retained; this guard is
 not a claim that rendering now reaches full speed. The smoke report includes
 `audio_output_call_us`, `audio_fairness_yields` and `audio_fairness_delay_us`.
 Test04 completed 600 emulator frames with 419 fresh 3D updates, expected native
-image hash and no watchdog errors/incidents. The reported hardware freeze was
-not reproduced here, so a physical PSP retest is still required.
- The menu reports available heap and unsupported
-audio commands. Never ignore a fault by increasing cache sizes blindly.
+image hash and no watchdog errors/incidents, but a subsequent physical PSP test
+reported a shutdown after gameplay started, before any log appeared. Do not
+treat that build as hardware-stable or keep retrying it.
+
+Test05 fixes an independently verified logging defect: the observer used a
+relative native file path without a worker working directory. Paths are now
+captured as absolute paths on main before workers start. It also keeps the
+audio engine/SRC alive after a failed join until worker completion is certain,
+and retains failed-to-delete thread IDs for cleanup. Neither finding establishes
+the cause of the hardware shutdown. No stack/VRAM overflow was demonstrated in
+the binary audit, and no kernel exception hook or firmware change was added.
+
+For diagnostic testing, put `psp-diagnostics.txt` containing `1` beside EBOOT.
+The private test05 package already includes it. This enables
+`psp-diagnostic.log`: checked startup checkpoints before graphics, ROM loading,
+audio startup and the first game frame, then snapshots approximately once per
+second during active gameplay. They include phase/frame counts, thread status,
+stack-fill high-water free counts, audio counters, main-published heap samples
+with their frame number, and kernel free/largest-block sizes. Stack-fill counts
+are estimates, not proof against all stack corruption.
+
+Each native append is closed and the device is synced; existing records are
+never truncated. Each log is capped at 2 MiB. Copy logs off the card before
+moving/clearing a full log; diagnostic gameplay is refused/stopped on path,
+write, sync or observer errors instead of silently continuing without evidence.
+Unexpected error text is checkpointed before audio teardown. Syncs add storage
+overhead, so this mode is not for performance benchmarking. A true power loss
+can still lose the last write or damage the filesystem; earlier checkpoints
+are evidence, not a crash dump or a guaranteed recovery mechanism.
+
+Keep `psp-settings.ini`, cabinet save files and the existing `roms/` folder
+when updating. To disable proactive logging later, remove the marker file.
+The normal fault-only observer remains. The menu reports available heap and
+unsupported audio commands. Never ignore a fault by increasing caches blindly.
 
 For an explicit cold-boot smoke test, place `smoke.txt` beside EBOOT with two
 integers: frame count (1-6000), presentation skip (0-3), for example `240 3`.
+A test-only optional third integer delays the first main frame by that many
+milliseconds (capped at 10000); `60 0 6000` deliberately exercises stall recording
+while audio continues. This is not used in install packages or normal play.
 It autostarts without controller input or saved cabinet state, writes progress
 to `smoke-progress.txt`, and writes `smoke-result.txt` when finished. Audio
 render-time and over-budget counters help distinguish mixing from board work;
