@@ -80,6 +80,30 @@ reduced main-board reads in a 6,000-frame host race from 3.623 GB to 1.461 GB,
 not to zero. Those numbers include startup, omit audio ROM traffic, and are
 not hardware throughput measurements.
 
+## Test10 frame-211 CPU video investigation
+
+The user confirmed that the traced test09 run powered off. Frame211 completed
+geometry and entered CPU video, but did not record video completion. The last
+main-thread stage is known; the faulting thread and instruction are not.
+
+Test10 retains marker `2` and adds detail only inside frame211: palette, tile
+cache, background, raster clear/order allocation/sort/draw, progress every128
+sorted polygon entries, 3D composition, foreground and final composition.
+Batch records stop at8192entries (64records maximum); later stage records
+remain enabled. Progress counts sorted entries, including filtered windows,
+not necessarily drawn polygons. Ordinary marker `1` does not enable this trace.
+
+Raster bounds guards reject vertex counts larger than the eight-vertex storage
+and prevent walking beyond populated edge chains. Empty-span comparisons avoid
+signed subtraction overflow. These protect invalid inputs; they have NOT been
+shown to explain the physical shutdown. Valid rendering output is unchanged in
+the6000frame replay. No large renderer cache or changed game timing was added.
+
+Back up saves and the previous log. Replace EBOOT and the supplied marker.
+Retain `psp-diagnostic.log` and `psp-fault.log` if produced, and stop repeated
+testing if another shutdown occurs. Synced trace writes can slow frame211 and
+affect audio command timing; this is not a performance benchmark.
+
 ## Test09 targeted frame-210 investigation
 
 Both physical test07 and test08 journals end with completed frame210 and no

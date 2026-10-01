@@ -1,5 +1,71 @@
 # Handoff
 
+## PSP test10 CPU video detail and bounds guards (2026-10-01)
+
+User explicitly confirmed poweroff on the latest traced test09 run. Its1136line
+journal is archived privately at build/psp-physical-test09-video211.log.
+Frame210 completed audio submission and presentation. Frame211 reached
+geometry_end (62256025us), then video_begin (62325352us) with guestPC000012b8,
+13147136instructions; no video_end/exception/shutdown record followed.
+Final published heap16715032used/987624freeB, system1175552freeB, main stack
+free221528B. This identifies last main-thread progress, NOT the faulting
+instruction/thread. Concurrent audio or hardware faults remain possible.
+
+Test10 follows the design's owner-thread/single-writer diagnostic constraints:
+- Marker2 retains frames205..216 tracing and installs Video/Raster observers
+  only for frame211. VideoEnd removes them. Default observers are null on
+  all platforms; marker1 keeps ordinary profiling.
+- Additional checkpoints split palette, tile cache, background, raster clear,
+  ordering allocation, sort, draw, every128sorted entries, 3D composition,
+  foreground and final composition. Sorted-entry progress includes windows
+  filtered out, not just drawn polygons. At most64batch checkpoints are
+  written (progress0..8064), then stage boundaries still report completion.
+- No additional large allocation/cache, shader or frame skipping. Synced
+  records can slow that frame and shift audio command timing; not an FPS test.
+- Raster rejected count>8 before indexing GeoPoly::v. Edge-list traversal now
+  checks populated ends and empty chains. Empty vertical spans compare bounds
+  directly instead of potentially overflowing signed subtraction. Invalid
+  inputs fail via existing exception/log/teardown paths, not dummy pixels.
+  These are defensive safety gaps found by inspection; no real-ROM failure
+  has yet triggered them. Do NOT call them the confirmed shutdown cause.
+
+Validation and findings:
+- Physical trace idle input in1=af differs from default replay8f because PSP
+  controls encode first gear. Added optional PSP_IDLE_INPUT=1 to host attract
+  audit, applying Controls::sample({0,120}) on both boards.600frames under
+  ASan/UBSan still produce digesta15e56b78f434bd2/finala5103ec1c6a9f12d:
+  this input difference alone did not reproduce the fault. This is not full
+  physical input/NV replay; user's cabinet saves are not available here.
+- Full6000frame race parity unchanged: digest14c33947133a8f6c,
+  finalde73b6f16dd18f81,196665345i960/223429779TGP instructions,
+  max2343polygons. No guard fired. Main ROM traffic remains971177984bytes.
+- Synthetic PSP raster regression rejects9/16/255vertices and validates
+  raster observer order. It passes ASan/UBSan; full host CTest32passed,
+  2optional Lua skipped. Host and PSP cross-builds pass. Instrumented replay
+  uses rebuilt audit/runtime sources, with generated/archive objects reused
+  uninstrumented; it does not establish hardware exception safety.
+- Original32MB PSP emulator600frames:121.354886s,419fresh3D, unchanged
+  hasha5103ec1c6a9f12d. All26detail records belong to frame211 with1383polygons:
+  15stage boundaries plus11batch records at0,128,...1280. Video_complete
+  follows, original trace closes after216, observer restarts, shutdown normal.
+- Heap16977192used/726232freeB, kernel1290240freeB after audio pause.
+  11059audio blocks,285late,peak81.089ms; no audio-system/log/watchdog
+  failure. Underruns and physical crash remain unresolved.
+- Evidence build/psp-test10-{race,idle-asan}.txt,psp-test10-ctest.log and
+  build/psp-emulator/{smoke-result,psp-diagnostic}-test10-600.*. The old
+  cumulative emulator journal was moved recoverably to
+  build/psp-emulator/cumulative-pre-test10.log before testing to avoid its
+  2MiB cap; user's Downloads log was not modified.
+
+Private update build/psp-test10-update.zip contains only EBOOT,marker2 and
+instructions. Full private folder build/psp-test10/PSP/GAME/DAYTONA has verified
+ROMs and no smoke marker or saves. EBOOT4615774bytes SHA256
+02e14177efecba196c3b90619ad07c369e68d4a2b64d777e07748add047db228.
+Next inspect the physical render_* sequence and any psp-fault.log. Back up
+saves/logs and stop repeated testing if poweroff recurs. Hardware stability
+and smooth gameplay are NOT claimed.
+
+
 ## PSP test09 bounded frame-210 shutdown trace (2026-10-01)
 
 Latest physical test08 journal is archived privately as
