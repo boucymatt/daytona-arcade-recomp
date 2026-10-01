@@ -86,6 +86,11 @@ private:
     int stride_ = kStride, margin_ = 0;
     HudMove hud_moves_[3];
     int hud_moves_count_ = 0;
+    bool trace_polygon_ = false;
+    size_t trace_ordinal_ = 0, trace_index_ = 0;
+    void trace_polygon(const char* stage) {
+        if (trace_polygon_) trace(stage, trace_ordinal_, trace_index_);
+    }
     RenderObserver observer_ = nullptr;
     void* observer_context_ = nullptr;
     void trace(const char* stage, size_t progress, size_t total) {
