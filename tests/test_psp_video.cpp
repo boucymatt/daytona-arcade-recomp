@@ -93,6 +93,9 @@ int main() {
     static_assert(rt::Video::OutputW == 480 && rt::Video::OutputH == 272);
     Memory memory;
     auto video = std::make_unique<rt::Video>(memory.tiles.data(), memory.chars.data());
+    video->set_wide_margin(192);
+    require(video->width() == 480 && video->screen().size() == 480 * 272,
+            "desktop widescreen does not resize PSP output");
     void *reference = psp_video_reference_create(memory.tiles.data(), memory.chars.data());
     require(video->output_width() == 480 && video->output_height() == 272, "native output dimensions");
     require(video->screen().size() == 480 * 272, "no logical-resolution screen allocation");
