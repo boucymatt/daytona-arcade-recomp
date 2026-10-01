@@ -106,8 +106,8 @@ public:
     // With widescreen: the race HUD's side groups at the screen edges.
     void set_hud_edges(bool on) { board_->video().set_hud_edges(on); }
     static int wide_margin(double aspect) {
-        const int width = 2 * int(kHeight * aspect / 2 + 0.5);
-        return width > kWidth ? (width - kWidth) / 2 : 0;
+        const int width = 2 * int(Video::H * aspect / 2 + 0.5);
+        return width > Video::W ? (width - Video::W) / 2 : 0;
     }
     M2Board &board() { return *board_; }
     snd::SoundBoard *sound() { return sound_.get(); } // null without the sound ROMs

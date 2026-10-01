@@ -1,5 +1,29 @@
 # Handoff
 
+## PSP branch rebased onto remote main (2026-10-01)
+
+Fetched origin/main at d9a3952 and rebased all10 PSP commits onto it, including
+the previously uncommitted test11/test12 work saved as13e4c21 first.
+Backup branch backup/psp-before-main-rebase-20261001 retains that complete state.
+Neither local main nor remote main was modified; PSP stays on psp-native-frontend.
+
+Resolved shared rendering conflicts by retaining main's desktop widescreen,
+HUD relocation, draw distance and build portability while preserving PSP
+480x272 buffers, guest-coordinate clips, ROM caches, audio, profiling and
+empty-span guard. PSP ignores desktop wide-margin requests for both geometry
+and compositor. Added regression checks for fixed PSP buffer dimensions.
+Added enhance.cpp to the PSP runtime for newly generated draw-distance hooks.
+Desktop widescreen calculations use guest dimensions, not PSP output dimensions.
+Validation: full host build and PSP cross-build pass. Default CTest23passed,
+2optional Lua skipped (main now makes Vita mock tests opt-in). PSP600frame
+replay retains digest a15e56b78f434bd2, finalhash a5103ec1c6a9f12d and
+23409665i960/12221670TGP instructions. An early parity link raced the host
+object rebuild and failed; rerun after build completion passes. Evidence:
+build/psp-rebase-{host,ctest,parity,cross-verified}.log.
+User authorized publishing only psp-native-frontend with an explicit remote
+lease. No main update, merge or PSP pull request to main is part of this work.
+
+
 ## PSP test12 empty-span reciprocal fix (2026-10-01)
 
 Physical test11 journal ends at frame211 sorted969/source215 poly_draw_begin;

@@ -174,6 +174,9 @@ void M2Board::vblank_start() {
 }
 
 void M2Board::set_wide_margin(int pixels) {
+#ifdef M2_PSP_NATIVE_VIDEO
+    pixels = 0; // Keep PSP geometry and composition at the native panel budget.
+#endif
     geo_->set_wide_margin(pixels);
     video_->set_wide_margin(pixels);
 }

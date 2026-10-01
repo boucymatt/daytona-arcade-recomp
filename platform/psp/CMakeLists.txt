@@ -57,7 +57,7 @@ add_library(psp_ymfm STATIC "${YMFM_DIR}/ymfm_opn.cpp" "${YMFM_DIR}/ymfm_adpcm.c
 target_include_directories(psp_ymfm SYSTEM PUBLIC "${YMFM_DIR}")
 target_compile_options(psp_ymfm PRIVATE -w)
 
-set(RUNTIME_FILES cpu tgp m2_tgp_board geo raster video m2_board game_loop zip rom_import
+set(RUNTIME_FILES enhance cpu tgp m2_tgp_board geo raster video m2_board game_loop zip rom_import
     archive m2_replay_bus lockstep snd_cpu multipcm sound_board paged_rom
     native_sample_mixer native_sound_sequencer native_sound_engine)
 set(RUNTIME_SOURCES)

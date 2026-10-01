@@ -159,6 +159,8 @@ int main() {
     static_assert(rt::Raster::kStride == 480 && rt::Raster::kHeight == 272);
     rt::Raster raster;
     Memory memory;
+    raster.set_wide_margin(192);
+    require(raster.stride() == 480, "desktop widescreen does not resize PSP raster");
     require(raster.stride() == 480, "native framebuffer stride");
     for (bool stretch : {false, true, false}) {
         coverage_and_clipping(raster, memory, stretch);
