@@ -108,6 +108,17 @@ void compare_video(rt::Video &a, rt::Video &b, unsigned frame) {
 }
 }
 
+struct StageAudit {
+    uint64_t calls = 0, instructions = 0;
+    static void observe(void* context, rt::GameLoop::Stage stage, uint64_t frame, uint32_t, uint64_t count) {
+        auto& audit = *static_cast<StageAudit*>(context);
+        require(unsigned(stage) == audit.calls % 6, "stage order", unsigned(frame));
+        require(frame == audit.calls / 6 + 1, "stage frame", unsigned(frame));
+        require(count >= audit.instructions, "stage instruction monotonicity", unsigned(frame));
+        audit.instructions = count;
+        ++audit.calls;
+    }
+};
 int main(int argc, char **argv) {
     if (argc < 2 || argc > 6) {
         std::fprintf(stderr, "usage: test_psp_memory_rom ROM_DIR [FRAMES=6000] [race|attract] [RENDER_START=0] [RENDER_FRAMES=0]\n");
@@ -125,6 +136,8 @@ int main(int argc, char **argv) {
         const std::array<std::shared_ptr<rt::PagedRom>, 5> files = {paged_images.program_file,
             paged_images.main_data_file, paged_images.copro_data_file, paged_images.polygons_file, paged_images.textures_file};
         rt::GameLoop dense(images(argv[1], false), false), paged(std::move(paged_images), false);
+        StageAudit stage_audit;
+        paged.set_stage_observer(StageAudit::observe, &stage_audit);
         const unsigned width = paged.board().video().output_width();
         const unsigned height = paged.board().video().output_height();
         require(width == rt::Video::OutputW && height == rt::Video::OutputH &&
@@ -184,6 +197,7 @@ int main(int argc, char **argv) {
             }
             max_polygons = std::max(max_polygons, paged.board().video().gpu_polys().size());
         }
+        require(stage_audit.calls == uint64_t(count) * 6, "stage coverage", count);
         require(screens_checked == render_frames, "render window coverage", count);
         if (render_frames) {
             require(raster_frames && nonblack_frames, "render window has no visible 3D frames", count);

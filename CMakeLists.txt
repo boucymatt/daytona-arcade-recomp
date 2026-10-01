@@ -367,6 +367,10 @@ target_include_directories(test_psp_video PRIVATE src)
 target_compile_definitions(test_psp_video PRIVATE M2_PSP_NATIVE_VIDEO=1 M2_LOW_MEMORY=1)
 add_test(NAME psp_video COMMAND test_psp_video)
 
+add_executable(test_psp_trace_window tests/test_psp_trace_window.cpp)
+target_include_directories(test_psp_trace_window PRIVATE platform/psp)
+add_test(NAME psp_trace_window COMMAND test_psp_trace_window)
+
 add_executable(test_psp_controls tests/test_psp_controls.cpp)
 target_include_directories(test_psp_controls PRIVATE platform/psp)
 add_test(NAME psp_controls COMMAND test_psp_controls)
