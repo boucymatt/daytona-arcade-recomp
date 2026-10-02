@@ -12,6 +12,19 @@
 namespace app {
 
 Launcher::Launcher(Config &cfg, SDL_Window *window) : cfg_(cfg), window_(window) {
+#ifdef SDL_PLATFORM_ANDROID
+    // Older mobile builds saved the picker result (content://...) directly.
+    // Do not reopen such a URI during startup: Android's temporary document
+    // grant may be stale, and the picker/JNI path is not part of launcher
+    // construction. Ask the user to browse again and import it then.
+    if (RomFile::is_content_uri(cfg_.rom_path)) {
+        cfg_.rom_path.clear();
+        path_buf_[0] = '\0';
+        cfg_.save();
+        rom_message_ = "Select the ROM set again with Browse.";
+        return;
+    }
+#endif
     std::snprintf(path_buf_, sizeof path_buf_, "%s", cfg_.rom_path.c_str());
     check_rom();
 }
