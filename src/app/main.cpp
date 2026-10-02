@@ -171,6 +171,11 @@ int main(int argc, char **argv) {
 
     // the name graphics overlays and drivers see (patches/sdl3: Vulkan's application name)
     SDL_SetAppMetadata("Daytona USA", nullptr, "daytona-recomp");
+#ifdef M2_MOBILE
+    // Mobile shells are landscape-only and always occupy the display.
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+    cfg.fullscreen = true;
+#endif
     if (!cfg.gpu.empty()) SDL_SetHint(SDL_HINT_GPU_DRIVER, cfg.gpu.c_str());
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) return fail("SDL_Init");
     Audio audio;
@@ -297,6 +302,13 @@ int main(int argc, char **argv) {
     };
     sync_native_audio();
     SDL_Gamepad *pad = nullptr;
+    // SDL_EVENT_GAMEPAD_ADDED only covers devices attached after startup. On
+    // phones/tablets a Bluetooth pad is commonly connected before the app is
+    // launched, so open the first existing pad too.
+    int pad_count = 0;
+    SDL_JoystickID *pads = SDL_GetGamepads(&pad_count);
+    if (pads && pad_count > 0) pad = SDL_OpenGamepad(pads[0]);
+    SDL_free(pads);
     uint64_t last = SDL_GetTicksNS();
     double pending = 0;
     const double frame_ns = 1e9 / kArcadeHz;
