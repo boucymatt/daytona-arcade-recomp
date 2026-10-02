@@ -231,3 +231,17 @@ The restored polygon/tessellation path is unchanged. Widescreen keeps a native
 matrix or GPU tile compositor change. This reduces backdrop upload bytes by27%
 at16:9. Unchanged foreground pixels reuse HUD grouping and uploads. CPU tile
 drawing and wider scene geometry still cost time; real Vita FPS is unverified.
+
+## GPU tiles after main 3044f3b
+
+The Vita branch includes the latest desktop GPU renderer but still uses GXM,
+not SDL_GPU's desktop shaders. Background and centred foreground tile layers
+are composed on GXM, including widescreen. Like desktop main, moving individual
+HUD items to the edges retains a CPU foreground-composition fallback. Tile
+decoding/cache updates remain on the CPU. Physical GPU buffering is separate:
+double by default, with single and triple available in Options.
+
+Road subdivision additionally checks perspective texture error against the
+same reciprocal-depth interpolation used by main. The existing eight-way cap
+and pool limits remain; this is not per-pixel perspective-shader parity and
+can increase geometry work. Hardware appearance/performance needs testing.

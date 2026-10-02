@@ -65,11 +65,10 @@ public:
     }
     // Vita GPU-fast path: keep the exact CPU tile layers, but let the host
     // draw the 3D polygons. The normal desktop/CPU path remains the default.
-    // desktop: the desktop hardware renderer, which draws the tilemap layers
+    // desktop: the SDL_GPU renderer, which draws the tilemap layers
     // itself from the decoded pixmaps (system24_pixels, system24_flags, the
     // tile generations) and this frame's snapshot (gpu_tile_words,
-    // gpu_pens), keeping widescreen; without it (Vita) the host draws the
-    // tiles at 496.
+    // gpu_pens). Vita uses its separate GXM tile path, also with widescreen.
     void set_external_3d(bool enabled, bool desktop = false) {
         if (enabled == external_3d_ && desktop == desktop_) return;
         external_3d_ = enabled;
@@ -96,6 +95,8 @@ public:
     bool external_3d() const { return external_3d_; }
     void set_gpu_background(bool enabled) { gpu_background_ = enabled; }
     bool gpu_background() const { return external_3d_ && gpu_background_ && margin_; }
+    // Like desktop main: only relocated per-item HUDs need the CPU front layer.
+    bool gpu_foreground() const { return gpu_background() && !hud_on_; }
     const std::vector<uint32_t> &background_layer() const { return background_gpu_; }
     const std::vector<uint32_t> &foreground_layer() const { return foreground_gpu_; }
     uint64_t background_generation() const { return background_generation_; }
