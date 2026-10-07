@@ -55,7 +55,7 @@ Video::Video(const uint8_t *tile_ram, const uint8_t *char_ram)
     for (int i = 0; i < 256; i++) gamma_[i] = uint8_t(std::max((double(i) - 64.0) * 255.0 / 191.0, 0.0));
     for (int l = 0; l < 4; l++) pixmap_[l].assign(512 * 512, 0), flags_[l].assign(512 * 512, 0);
     system24_tile_generations_.resize(4 * 4096);
-#ifndef M2_VITA_RENDER_OPT
+#if !defined(M2_VITA_RENDER_OPT) && !defined(M2_PSP_NATIVE_VIDEO)
     dec_chars_.resize(0x80000);
     dec_char_dirty_.resize(0x4000);
     dec_tiles_.resize(4 * 4096);
@@ -186,7 +186,7 @@ void Video::build_layer(int layer) {
             (val & 0x8000 ? foreground_dirty_ : background_dirty_) = true;
         }
         previous = val;
-#else
+#elif !defined(M2_PSP_NATIVE_VIDEO)
         // Desktop: only tiles whose value or character changed (decode_layers).
         uint16_t &previous = dec_tiles_[base + t];
         if (dec_valid_ && previous == val && !dec_char_dirty_[code]) continue;
@@ -1056,6 +1056,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         profile_.tile_draw += ticks() - before;
 #endif
 #ifndef M2_DC_MEMORY
+#ifndef M2_PSP_NATIVE_VIDEO
         if (margin_) {
             hud_on_ = hud_edges_ && raster_.find_race_hud(polys, crtc_x_ + margin_, crtc_y_);
             set_raster_hud_moves();
@@ -1064,7 +1065,9 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
             else copy_trans(sys24_.data(), W, W, margin_);
             foreground_gpu_ = screen_;
             ++background_generation_; ++foreground_generation_;
-        } else {
+        } else
+#endif
+        {
             std::fill(foreground_gpu_.begin(), foreground_gpu_.end(), 0u);
             std::copy_n(sys24_.data(), std::min(sys24_.size(), foreground_gpu_.size()), foreground_gpu_.data());
         }

@@ -1,5 +1,29 @@
 # Handoff
 
+## PSP rebased onto original upstream (2026-10-07)
+
+Fetched alphanu1 upstream/main 0435a46 and rebased all 12 PSP commits,
+including the new memory changes, onto it. Recovery branch:
+backup/psp-before-upstream-20261007 (4848155). This is original upstream,
+not the fork's stale main. Main, Vita and mobile branch refs are unchanged.
+
+Combined PSP PagedRom and native 480x272 paths with upstream Dreamcast
+RomSource, 16-bit composition, sparse mappings and current HUD detection.
+Kept PSP audio scheduling, tile-write tracking and shutdown diagnostics.
+Build validation caught a duplicate tile-cache variable, a desktop-only
+composition call in the PSP path and the required comm_board.cpp build
+dependency; fixed all three. PSP does not allocate upstream's duplicate
+desktop character-decode caches. Dreamcast macro paths pass host syntax
+checks; no Dreamcast hardware validation is claimed.
+
+After rebase: all 12 PSP/paging tests pass with assertions enabled. The
+6000-frame real-ROM dense/paged audit again matches 196665345 i960 and
+223429779 TGP instructions, 2343 peak polygons, zero resident framebuffer
+pages and 480000-byte polygon storage. All 120 CPU-rendered frames and all
+256 lazy-framebuffer page/boundary tests pass. Full PSPSDK EBOOT build passes:
+build/psp/EBOOT.PBP. The approximate 1.57 MiB allocation saving is retained;
+real PSP-1000 FPS and shutdown behavior still need a hardware test.
+
 ## PSP Dreamcast-derived memory savings (2026-10-07)
 
 Adapted the Dreamcast memory plan from main's platform/dreamcast/HANDOFF.md:

@@ -59,7 +59,7 @@ target_compile_options(psp_ymfm PRIVATE -w)
 
 set(RUNTIME_FILES enhance cpu tgp m2_tgp_board geo raster video m2_board game_loop zip rom_import
     archive m2_replay_bus lockstep snd_cpu multipcm sound_board paged_rom
-    native_sample_mixer native_sound_sequencer native_sound_engine)
+    native_sample_mixer native_sound_sequencer native_sound_engine comm_board)
 set(RUNTIME_SOURCES)
 foreach(name IN LISTS RUNTIME_FILES)
     list(APPEND RUNTIME_SOURCES "${DAYTONA_ROOT}/src/runtime/${name}.cpp")
