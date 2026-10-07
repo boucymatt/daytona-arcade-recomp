@@ -162,7 +162,14 @@ four-way caches.
 The default non-PSP cache policy stays four-way. PSP skips redundant seeks only
 when an exclusive file owner's last successful full read ended at the exact
 requested offset; failed or short reads invalidate that position and cache tag.
-Mutable board RAM stays resident. M2_LOW_MEMORY selects a sparse page table and lazy
+Mutable board RAM stays resident once written. M2_LOW_MEMORY also backs the
+normally untouched 1 MiB guest framebuffer with zero-initialized 4 KiB pages
+on first nonzero write, preserving reads, writes and burst flags. It releases
+the duplicate copro table image after decoding and reserves 2400 polygons
+(not a limit) to reduce geometry allocation peaks, following the Dreamcast
+memory plan. A 6000-frame PSP host replay used no framebuffer backing and
+peaked at 2343 polygons; hardware performance remains unverified.
+M2_LOW_MEMORY selects a sparse page table and lazy
 allocation of unused external-GPU layer buffers; desktop and Vita defaults
 remain dense. SD/Memory Stick caching is not expanded physical RAM or firmware
 swap. I/O errors fail visibly instead of supplying dummy ROM data.

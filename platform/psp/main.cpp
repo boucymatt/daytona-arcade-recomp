@@ -546,6 +546,8 @@ int main() {
         auto loaded = psp::load_game("roms", diagnostic_enabled ? rom_io_event : nullptr, io_contexts);
         stage(display, "Creating native main board and CPU renderer");
         game = std::make_unique<rt::GameLoop>(std::move(loaded.images), false);
+        std::printf("PSP low memory: TGP image copy released; guest framebuffer resident=%zu/1048576 bytes\n",
+                    game->board().framebuffer_resident_bytes());
         if (targeted_trace) game->set_stage_observer(trace_stage, &game->board().video());
         if (smoke || diagnostic_enabled) {
             game->set_profile_clock(now_us);

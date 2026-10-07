@@ -61,6 +61,13 @@ update and CPU raster still runs. It is not a cure for a CPU rendering limit.
 
 ## Memory and storage
 
+Dreamcast-derived low-memory changes release the duplicate 256 KiB TGP
+table, reserve 2400 polygons (still growable), and allocate guest framebuffer
+RAM only when written. A 6000-frame host race used no framebuffer pages and
+peaked at 2343 polygons: approximately 1.57 MiB less backing allocation.
+Hardware FPS and shutdown behavior still need testing; no VRAM or sound-RAM
+assumptions from Dreamcast are applied to PSP.
+
 The target is PSP-1000's 32 MB physical RAM and 24 MiB user partition, which
 also contains the executable and thread stacks. The PBP explicitly requests
 `MEMSIZE=0`; no expanded-memory firmware setting is needed. ARK-5's

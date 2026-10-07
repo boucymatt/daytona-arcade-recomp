@@ -68,12 +68,19 @@ M2Board::M2Board(Images images)
 #else
 M2Board::M2Board(Images images)
     : img_(std::move(images)), ram_(0x20000), work_(0x100000), cpuctl_(0x1000), backup_(0x4000, 0xff), tile_(0x10000),
-      chr_(0x80000), palette_(0x4000), xlat_(0xc000), tex0_(0x200000), tex1_(0x200000), luma_(0x20000), fb_a_(0x80000),
-      fb_b_(0x80000), comm_(0x4000),
+      chr_(0x80000), palette_(0x4000), xlat_(0xc000), tex0_(0x200000), tex1_(0x200000), luma_(0x20000),
+#ifndef M2_LOW_MEMORY
+      fb_a_(0x80000), fb_b_(0x80000),
+#endif
+      comm_(0x4000),
 #ifndef M2_LOW_MEMORY
       pages_(size_t(1) << (32 - kPageBits)),
 #endif
       tgp_(img_.copro_tables, img_.copro_data, img_.copro_data_file) {
+#ifdef M2_LOW_MEMORY
+    // TgpBoard owns the decoded copy, as in the Dreamcast memory path.
+    std::vector<uint8_t>().swap(img_.copro_tables);
+#endif
     // model2o memory map (MAME model2_base_mem, model2_tgp_mem, model2o_mem)
     if (img_.program_file) {
         if (img_.program_file->size() != 0x200000) throw Fatal("bad paged program image");
@@ -127,6 +134,8 @@ M2Board::M2Board(Images images)
         map(0x11600000, 0x1167ffff, Ram, img_.frame_buffer_ram);
         map(0x11680000, 0x116fffff, Ram, img_.frame_buffer_ram + 0x80000);
     }
+#elif defined(M2_LOW_MEMORY)
+    map(0x11600000, 0x116fffff, ZeroRam, nullptr);
 #else
     map(0x11600000, 0x1167ffff, Ram, fb_a_.data());
     map(0x11680000, 0x116fffff, Ram, fb_b_.data());
@@ -618,6 +627,16 @@ uint32_t M2Board::read_dword(uint32_t addr) {
     }
 }
 
+#ifdef M2_LOW_MEMORY
+void M2Board::materialize_framebuffer(uint32_t addr) {
+    auto &storage = framebuffer_pages_.at((addr - 0x11600000u) >> kPageBits);
+    storage = std::make_unique<uint8_t[]>(1u << kPageBits);
+    auto &p = mapped_page(addr);
+    p.base = storage.get();
+    p.kind = Ram;
+}
+#endif
+
 void M2Board::write_byte(uint32_t addr, uint8_t data) {
 #ifdef M2_DC_SPEED
     if ((addr >> kPageBits) == fast_write_page_) {
@@ -628,6 +647,11 @@ void M2Board::write_byte(uint32_t addr, uint8_t data) {
     const Page &p = page(addr);
     const unsigned sh = (addr & 3) * 8;
     switch (p.kind) {
+#ifdef M2_LOW_MEMORY
+    case ZeroRam:
+        if (data) { materialize_framebuffer(addr); write_byte(addr, data); }
+        return;
+#endif
     case Ram: {
 #ifdef M2_DC_SPEED
         fast_write(addr, p);
@@ -655,6 +679,11 @@ void M2Board::write_word(uint32_t addr, uint16_t data) {
     const Page &p = page(addr);
     const unsigned sh = (addr & 2) * 8;
     switch (p.kind) {
+#ifdef M2_LOW_MEMORY
+    case ZeroRam:
+        if (data) { materialize_framebuffer(addr); write_word(addr, data); }
+        return;
+#endif
     case Ram: {
 #ifdef M2_DC_SPEED
         fast_write(addr, p);
@@ -689,6 +718,11 @@ void M2Board::write_dword(uint32_t addr, uint32_t data) {
 #endif
     const Page &p = page(addr);
     switch (p.kind) {
+#ifdef M2_LOW_MEMORY
+    case ZeroRam:
+        if (data) { materialize_framebuffer(addr); write_dword(addr, data); }
+        return;
+#endif
     case Ram: {
 #ifdef M2_DC_SPEED
         fast_write(addr, p);

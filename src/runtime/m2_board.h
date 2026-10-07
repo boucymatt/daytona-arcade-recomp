@@ -123,9 +123,16 @@ public:
 #ifdef M2_DC_SPIN_SKIP
     uint64_t spin_skipped() const { return spin_skipped_; } // instructions skipped in the frame wait (read_byte)
 #endif
+#ifdef M2_LOW_MEMORY
+    size_t framebuffer_resident_bytes() const {
+        size_t bytes = 0;
+        for (const auto &p : framebuffer_pages_) if (p) bytes += 4096;
+        return bytes;
+    }
+#endif
 
 private:
-    enum Kind : uint8_t { Unmapped, Rom, Ram, Tex, Dev, FileProgram, FileMainData };
+    enum Kind : uint8_t { Unmapped, Rom, Ram, Tex, Dev, FileProgram, FileMainData, ZeroRam };
     struct Page {
         Kind kind = Unmapped;
         bool burst = false;
@@ -178,6 +185,11 @@ private:
     std::vector<std::unique_ptr<Page[]>> chunks_;
     static Page unmapped_; // what page() gives outside the map; never written
 #elif defined(M2_LOW_MEMORY)
+    // Guest framebuffer RAM is normally untouched. Preserve RAM semantics
+    // without keeping 1 MiB resident: reads start at zero, first nonzero
+    // write allocates one page and converts its mapping to ordinary RAM.
+    std::array<std::unique_ptr<uint8_t[]>, 256> framebuffer_pages_{};
+    void materialize_framebuffer(uint32_t addr);
     std::array<std::unique_ptr<Page[]>, 1024> pages_{};
     const Page unmapped_page_{};
 #else

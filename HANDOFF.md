@@ -1,5 +1,27 @@
 # Handoff
 
+## PSP Dreamcast-derived memory savings (2026-10-07)
+
+Adapted the Dreamcast memory plan from main's platform/dreamcast/HANDOFF.md:
+release the copied 256 KiB copro table image after TgpBoard construction,
+and reserve 2400 polygons to avoid vector growth to 4096. PSP's 6000-frame
+race peaks at 2343 polygons (200 bytes each); reserve is not a hard limit.
+Unlike Dreamcast's omitted framebuffer mapping, PSP preserves all guest
+framebuffer RAM semantics: zero-initialized 4 KiB pages are materialized on
+first nonzero write and become ordinary RAM. No swapping or discarded writes.
+These changes are selected only by M2_LOW_MEMORY. Inputs, timing, audio and
+the existing ROM-cache budgets are unchanged. Main/Vita/mobile are untouched.
+
+Before rebase: 6000-frame dense/paged parity passed (196665345 i960 and
+223429779 TGP instructions); 120 native 480x272 rendered frames match with
+digest 7de7910d99b0b79b. Framebuffer backing remained zero; geometry reserved
+480000 bytes rather than 819200. About 1.57 MiB less backing storage including
+the 1 KiB PSP page-owner array, excluding allocator overhead. All 256 lazy
+pages passed mixed-width/boundary tests. All 12 PSP/paging tests passed with
+assertions enabled. PSPSDK compile check and full EBOOT build passed.
+Not measured on hardware; no FPS or shutdown-fix claim. Full package is
+build/psp/EBOOT.PBP; rebase validation must precede final handoff.
+
 ## PSP branch rebased onto remote main (2026-10-01)
 
 Fetched origin/main at d9a3952 and rebased all10 PSP commits onto it, including

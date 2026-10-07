@@ -144,6 +144,9 @@ int main(int argc, char **argv) {
         const std::array<std::shared_ptr<rt::PagedRom>, 5> files = {paged_images.program_file,
             paged_images.main_data_file, paged_images.copro_data_file, paged_images.polygons_file, paged_images.textures_file};
         rt::GameLoop dense(images(argv[1], false), false), paged(std::move(paged_images), false);
+#ifdef M2_LOW_MEMORY
+        require(paged.board().framebuffer_resident_bytes() == 0, "lazy framebuffer startup", 0);
+#endif
         StageAudit stage_audit;
         paged.set_stage_observer(StageAudit::observe, &stage_audit);
         const unsigned width = paged.board().video().output_width();
@@ -238,6 +241,36 @@ int main(int argc, char **argv) {
         std::printf("PSP paging parity: %u frames, %llu i960 instructions, %llu TGP instructions, max polygons=%zu, cache=%zu bytes\n",
             count, (unsigned long long)paged.instructions(), (unsigned long long)paged.board().tgp().tgp_instructions(),
             max_polygons, cache_bytes);
+#ifdef M2_LOW_MEMORY
+        auto &board = paged.board();
+        std::printf("Guest framebuffer resident after replay: %zu / 1048576 bytes\n",
+                    board.framebuffer_resident_bytes());
+        std::printf("Geometry storage: polygon=%zu bytes reserved=%zu bytes\n",
+                    sizeof(rt::GeoPoly), board.video().gpu_polys().capacity() * sizeof(rt::GeoPoly));
+        // Exercise every page in both banks after gameplay, including final
+        // byte/word/dword boundaries and lane preservation. No ROM assumptions.
+        for (uint32_t i = 0; i < 256; ++i) {
+            const uint32_t a = 0x11600000u + i * 4096;
+            const size_t before = board.framebuffer_resident_bytes();
+            const uint32_t old = board.read_dword(a);
+            board.write_dword(a, old);
+            require(board.framebuffer_resident_bytes() == before, "unchanged write allocation", i);
+            board.write_dword(a, 0x12345678);
+            board.write_byte(a + 1, 0xab);
+            board.write_word(a + 2, 0xcdef);
+            require(board.read_dword(a) == 0xcdefab78, "lazy RAM byte lanes", i);
+            board.write_byte(a + 4095, 0x5a);
+            require(board.read_byte(a + 4095) == 0x5a, "last page byte", i);
+            board.write_word(a + 4094, 0x369c);
+            require(board.read_word(a + 4095) == 0x369c, "aligned last word", i);
+            board.write_dword(a + 4092, 0x13579bdf);
+            require(board.read_dword(a + 4095) == 0x13579bdf, "aligned last dword", i);
+            board.write_dword(a, 0);
+            require(board.read_dword(a) == 0, "write zero after allocation", i);
+        }
+        require(board.framebuffer_resident_bytes() == 1048576, "bounded framebuffer backing", 0);
+        std::puts("Lazy framebuffer: all 256 pages, both banks and mixed-width accesses passed");
+#endif
         return 0;
     } catch (const std::exception &e) {
         std::fprintf(stderr, "PSP paging parity failed: %s\n", e.what());

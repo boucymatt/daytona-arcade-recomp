@@ -48,6 +48,11 @@ Geo::Geo(const std::vector<uint8_t> &polygons, const std::vector<uint8_t> &textu
     if (!polygon_words || (polygon_words & (polygon_words - 1)) || !texture_words ||
         (texture_words & (texture_words - 1)))
         throw GeoFatal("bad polygon or texture ROM image");
+#ifdef M2_LOW_MEMORY
+    // Dreamcast's approach avoids the 2048 -> 4096 growth peak. The PSP
+    // 6000-frame race audit peaks at 2343; this is a reserve, never a cap.
+    polys.reserve(2400);
+#endif
     if (!polygon_file_) std::memcpy(polygon_rom_.data(), polygons.data(), polygon_words * 4);
     if (!texture_file_) std::memcpy(texture_rom_.data(), textures.data(), texture_words * 2);
     raster_.texture_rom = texture_rom_.data();
