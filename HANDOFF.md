@@ -1,5 +1,60 @@
 # Handoff
 
+## Xbox 360 initial audit and boot probe (2026-10-10)
+
+Created xbox360 from the current clean main; no other branch was changed.
+Audited repository architecture and pinned OpenXeChain buildscript/LLVM,
+newlib, xecorelib and SynthXEX sources. Plan, evidence and deployment gates
+are in platform/xbox360/README.md. The SDK is not a ready SDL replacement:
+C++ standard-library hooks are empty and no C++ library is built; controller
+and audio import names do not establish tested typed interfaces; Vd headers
+include unknown arguments. Do not invent these APIs or treat generic PowerPC
+ELF as a native Aurora XEX.
+
+Added a ROM-free C boot/filesystem/endian probe, a fail-fast isolated builder,
+host endian tests and a manual experimental CI workflow. The shared runtime
+still requires a systematic endianness conversion (board memcpy accesses,
+CPU register spills, TGP words, texture casts and SoftFloat layout). No global
+LITTLEENDIAN toggle or existing platform behavior was changed. Full game,
+rendering, controller and audio game integration are not implemented yet.
+A separate controller probe uses the public Xenia-referenced XAM signature;
+packet decoding/ADC mapping has exhaustive host tests. Polling and hotplug
+remain hardware-unverified. Keep this separate from the first boot test.
+
+Real Trinity launch, marker persistence and dashboard return require hardware.
+Host Clang 23 initially rejected LLVM's optional benchmark __COUNTER__ macro
+with -Werror,-Wc2y-extensions. Resume by preconfiguring the LLVM cache with
+LLVM_INCLUDE_BENCHMARKS=OFF and LLVM_INCLUDE_TESTS=OFF; do not change target
+code or weaken project floating-point settings. CI/instructions include this.
+
+The next upstream failure was compiler-rt finding /usr/lib/cmake/llvm and
+trying to import host shared libraries into Generic/Xbox. The checked-in
+finish_toolchain.py completes this stage with LLVM_RUNTIMES_BUILD=ON,
+source-tree CMake modules and static compile checks, then installs SynthXEX.
+This completion script passed from a fresh separate build directory. LLVM,
+newlib and xecorelib themselves were built by the pinned upstream script;
+no upstream source patches were needed. The upstream /align-without-/driver
+linker warning remains and is not proof either way of console compatibility.
+
+Both C probes build and package: build/xbox360-smoke/default.xex and
+build/xbox360-input/default.xex, each 266240 bytes. PE inspection reports
+32-bit PowerPC, machine 0x1f2, Xbox subsystem 0x0e; input imports include
+XamInputGetState. SynthXEX validates the intermediate PE; XEX2 magic checked.
+These are structure/build checks, NOT a hardware boot claim.
+SHA-256 (2026-10-10):
+- boot: a77be4a97626ec0f2be0aadeea98a9d8c33cf72918c99dad201bd7f1541e8bb6
+- input: 6e9d5f01ff99a4f4a717288dd33ca893a5f94d3aaffecc68408f878ca50eda65
+
+Host validation: four Python builder tests, 262144 guest endian cases and
+65536 steering cases plus packet/pedal checks pass; workflow YAML parses.
+Address/UB checks pass with LeakSanitizer disabled because this sandbox's
+ptrace environment prevents leak checking. No console or hosted CI run.
+The actual target C++20 probe fails at <vector> not found, confirming the
+standard-library gate. Do not claim gameplay or attempt to link host C++
+libraries. Next: run the boot probe on Trinity, then the separate input probe;
+port/validate the C++ ABI/runtime before integrating GameLoop. Native video
+presentation/audio, full guest-endian conversion and memory telemetry remain.
+
 ## Mobile upstream rebase and GPU startup diagnostics (2026-10-07)
 
 Rebased mobile onto original alphanu1 upstream/main 0435a46; recovery branch

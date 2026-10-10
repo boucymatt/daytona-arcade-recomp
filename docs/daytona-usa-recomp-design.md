@@ -354,6 +354,14 @@ Correctness is proven by lockstep differential testing against MAME, frame by fr
 
 ## Platform layer & build
 
+**Xbox 360 bring-up exception (2026-10-10).** An isolated OpenXeChain C boot
+probe lives in `platform/xbox360`; it does not link SDL or game code. The full
+port requires a C++20 runtime, explicit little-endian guest memory access on
+big-endian PowerPC, and verified native presentation/input/audio adapters.
+Initial rendering is planned to upload the existing CPU reference framebuffer,
+not fork shaders. See that directory's staged plan and hardware acceptance
+criteria. No Xbox gameplay or successful hardware boot is claimed.
+
 One CMake project, C++20, SDL3 for window, input, haptics, audio and GPU, so platform-specific code stays under a few hundred lines. The user runs a first-launch importer that verifies their ROMs and generates the game code locally.
 
 | Platform | Arch | Graphics | Toolchain | Package |

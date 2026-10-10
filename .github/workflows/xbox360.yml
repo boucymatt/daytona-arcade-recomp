@@ -1,0 +1,68 @@
+name: Xbox 360 boot probe (experimental)
+# Manual: building patched LLVM is expensive. No ROM or game code in CI.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Host prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build make binutils python3-yaml gawk bzip2 gzip zip unzip zlib1g-dev
+      - name: Guest byte-order unit test
+        run: |
+          python3 platform/xbox360/test_build.py
+          cc -std=c11 -Wall -Wextra -Werror platform/xbox360/test_guest_le.c -o "$RUNNER_TEMP/guest-le-test"
+          "$RUNNER_TEMP/guest-le-test"
+          cc -std=c11 -Wall -Wextra -Werror platform/xbox360/test_controller.c -o "$RUNNER_TEMP/controller-test"
+          "$RUNNER_TEMP/controller-test"
+      - name: Build pinned OpenXeChain
+        env:
+          PREFIX: ${{ runner.temp }}/openxechain-sdk
+          PARALLEL: '2'
+        run: |
+          git clone https://github.com/OpenXeChain/buildscript.git "$RUNNER_TEMP/openxechain"
+          cd "$RUNNER_TEMP/openxechain"
+          git checkout eed1fa65bf9577fd31625764b320a90182ea9ade
+          git -c url.https://github.com/.insteadOf=git@github.com: submodule update --init --depth 1
+          cmake -S llvm/llvm -B build -G Ninja \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD=PowerPC \
+            '-DLLVM_ENABLE_PROJECTS=lld;clang' \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_TESTS=OFF
+          if ! bash build-toolchain.sh; then
+            # Only recover the observed host-LLVM discovery failure. Do not
+            # hide arbitrary compiler/newlib failures or restart LLVM.
+            grep -q 'ADD_LIBRARY called with SHARED option' build.log || exit 1
+            python3 "$GITHUB_WORKSPACE/platform/xbox360/finish_toolchain.py" \
+              --source "$PWD" --sdk "$PREFIX" \
+              --out "$RUNNER_TEMP/sdk-completion" --jobs "$PARALLEL"
+          fi
+      - name: Build smoke XEX
+        run: |
+          python3 platform/xbox360/build.py --sdk "$RUNNER_TEMP/openxechain-sdk"
+          python3 platform/xbox360/build.py --sdk "$RUNNER_TEMP/openxechain-sdk" --input-probe
+      - name: Preserve toolchain failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openxechain-failure-log
+          path: ${{ runner.temp }}/openxechain/build.log
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xbox360-smoke-hardware-untested
+          path: build/xbox360-smoke/default.xex
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xbox360-input-hardware-untested
+          path: build/xbox360-input/default.xex
+          if-no-files-found: error

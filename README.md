@@ -19,6 +19,7 @@ MAME-format `.zip` or `.7z`): `daytona93` (Daytona USA Deluxe '93) or
 | iOS | Works on iPhone, installed through Xcode or AltStore, with touch controls or a controller; tested on a device | [platform/mobile](platform/mobile/README.md) |
 | PS Vita | Works: a native Vita app (SDL2); tested on a Vita | [platform/vita](platform/vita/README.md) |
 | Dreamcast | Runs in the Flycast emulator with sound and the controller, about 32 frames/s (the arcade runs 57.52); not yet on a console; in progress | [platform/dreamcast](platform/dreamcast/README.md) |
+| Xbox 360 | Initial OpenXeChain boot-probe work; no gameplay or hardware validation | [platform/xbox360](platform/xbox360/README.md) |
 
 Every port starts from the desktop setup: the game code is generated on a
 desktop computer from your ROM set, then built for the other platform.

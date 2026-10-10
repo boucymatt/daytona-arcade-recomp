@@ -49,6 +49,7 @@ compile_commands.json
 *.dll
 *.dylib
 *.exe
+*.xex
 *.pdb
 *.obj
 *.lib
