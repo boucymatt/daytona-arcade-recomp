@@ -15,6 +15,16 @@
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
+#ifdef M2_XBOX360_SMALL_DRAW_STACK
+#include <memory>
+#endif
+
+#ifdef M2_XBOX360_VIDEO_TRACE
+extern void xbox_video_checkpoint(const char *phase);
+extern void xbox_video_buffer(const char *name, const uint32_t *data, size_t count, size_t expected);
+#else
+static inline void xbox_video_checkpoint(const char *) {}
+#endif
 
 namespace rt {
 
@@ -233,7 +243,11 @@ void Video::decode_layers() {
     } else {
         std::memcpy(dec_chars_.data(), char_ram_, dec_chars_.size());
     }
-    for (int l = 0; l < 4; l++) build_layer(l);
+    for (int l = 0; l < 4; l++) {
+        xbox_video_checkpoint("Video build_layer begin");
+        build_layer(l);
+        xbox_video_checkpoint("Video build_layer end");
+    }
     dec_valid_ = true;
     character_memory_touched_ = tile_memory_touched_ = false;
 }
@@ -462,13 +476,20 @@ M2_PIXEL_TEMPLATE void Video::tilemap_draw(std::vector<M2_PIXEL> &dm, int L, int
 
 // segaic24 draw_common for the rgb32 bitmap, cliprect = the whole screen.
 M2_PIXEL_TEMPLATE void Video::draw(std::vector<M2_PIXEL> &bitmap, int layer, int flags M2_PENS) {
+    xbox_video_checkpoint("Video draw entry; before tile registers and mask");
     uint16_t hscr = tile(0x5000 + uint32_t(layer >> 1));
     uint16_t vscr = tile(0x5004 + uint32_t(layer >> 1));
     const uint16_t ctrl = tile(0x5004 + uint32_t((layer >> 1) & 2));
 #ifdef M2_DC_SPEED
     const uint32_t mask_base = layer & 4 ? 0x6800 : 0x6000; // (the mask is read below, where it is used)
 #else
+#ifdef M2_XBOX360_SMALL_DRAW_STACK
+    // Diagnostic: keep this 4 KiB temporary off the deeply nested guest dispatch stack.
+    std::unique_ptr<uint16_t[]> mask_owner(new uint16_t[0x800]);
+    uint16_t *mask = mask_owner.get();
+#else
     uint16_t mask[0x800];
+#endif
     for (uint32_t i = 0; i < 0x800; i++) mask[i] = tile((layer & 4 ? 0x6800 : 0x6000) + i);
 #endif
     const uint16_t tpri = uint16_t(layer & 1);
@@ -675,11 +696,13 @@ void Video::compose16(int cat, const bool uses[4], const uint8_t *extra_lines) {
 #endif
 
 void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const VideoMem &mem) {
+    xbox_video_checkpoint("Video entry; before profile clock");
     gpu_polys_ = &polys;
     gpu_windows_ = windows;
     gpu_mem_ = mem;
     profile_ = {};
     uint64_t before = ticks();
+    xbox_video_checkpoint("Video before palette");
     // Retain the reference's sticky palette-dirty behavior. palette_w marks
     // cached composition dirty only if the resulting RGB value really changed.
     if (palette_dirty_) {
@@ -689,7 +712,9 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
 #ifdef M2_VITA_RENDER_OPT
     update_tile_cache();
 #else
+    xbox_video_checkpoint("Video before decode_layers");
     decode_layers();
+    xbox_video_checkpoint("Video after decode_layers");
 #endif
     if (system24_source_dirty_) {
         ++system24_texture_generation_;
@@ -813,6 +838,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
     }
 #endif
     // Non-zero pixels of a `width`-wide source onto the screen at column `at`.
+    xbox_video_checkpoint("Video before layer composition");
     const size_t out_w = size_t(width());
     auto copy_trans = [&](const uint32_t *source, size_t stride, int width = W, int at = 0) {
         for (int y = 0; y < H; ++y)
@@ -878,8 +904,14 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
     }
     profile_.composite += ticks() - before;
 #else
+    xbox_video_checkpoint("Video before background clock");
     before = ticks();
+#ifdef M2_XBOX360_VIDEO_TRACE
+    xbox_video_buffer("screen", screen_.data(), screen_.size(), size_t(width()) * H);
+#endif
+    xbox_video_checkpoint("Video before screen fill");
     std::fill(screen_.begin(), screen_.end(), pens_[0]);
+    xbox_video_checkpoint("Video after screen fill");
 #ifdef M2_DC_SPEED
     // As the Vita's path: the back layers drawn straight over pen 0, not
     // into a cleared sys24_ copied over it (no margins: the same stride).
@@ -891,7 +923,12 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
     } else
 #endif
     {
+#ifdef M2_XBOX360_VIDEO_TRACE
+        xbox_video_buffer("sys24", sys24_.data(), sys24_.size(), size_t(W) * (H + 4));
+#endif
+        xbox_video_checkpoint("Video before sys24 clear");
         std::fill(sys24_.begin(), sys24_.end(), 0u);
+        xbox_video_checkpoint("Video after sys24 clear; before first draw");
         for (int layer = 3; layer >= 2; --layer) draw(sys24_, layer << 1, DRAW_OPAQUE);
         for (int layer = 1; layer >= 0; --layer) draw(sys24_, layer << 1, 0);
         profile_.tile_draw += ticks() - before;
@@ -903,6 +940,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
 #endif
     rendered_now_ = false;
     if (external_3d_) {
+        xbox_video_checkpoint("Video external renderer branch");
         // Save the exact two System-24 layers separately. The Vita frontend
         // draws background -> GPU 3D -> foreground. No CPU polygon pixels are
         // produced in this mode, so raster_ms should remain zero.
@@ -936,6 +974,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
     // Widescreen, HUD at the edges: the front tilemaps are drawn first, to
     // decide which HUD groups move; 3D windows inside a moved group go with it.
     const bool hud_edges = margin_ && hud_edges_;
+    xbox_video_checkpoint("Video background complete; before raster");
     if (hud_edges) {
         before = ticks();
         std::fill(sys24_.begin(), sys24_.end(), 0u);
@@ -963,10 +1002,12 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
     }
     before = ticks();
     if (margin_) {
+        xbox_video_checkpoint("Video before margins");
         if (!render_done_) coverage_ = 0; // no 3D this frame: a 2D screen
         fill_margins();
     }
     if (render_done_) copy_trans(raster_.pixels(), size_t(raster_.stride()), width());
+    xbox_video_checkpoint("Video raster composite complete; before foreground");
     profile_.composite += ticks() - before;
 #ifndef M2_VITA_RENDER_OPT
     if (!hud_edges) {
@@ -978,10 +1019,12 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
 #endif
     before = ticks();
     if (hud_edges && hud_on_) {
+        xbox_video_checkpoint("Video HUD edge composite");
         copy_front_hud_to_edges(screen_);
     } else {
         copy_trans(sys24_.data(), W, W, margin_);
     }
+    xbox_video_checkpoint("Video foreground complete");
     profile_.composite += ticks() - before;
 }
 

@@ -9,6 +9,7 @@
 // MAME's reference build gives, so every host agrees.
 
 #include "runtime/raster.h"
+#include "runtime/guest_endian.h"
 #ifdef M2_VITA_RENDER_OPT
 #include "runtime/raster_texel.h"
 #endif
@@ -75,7 +76,7 @@ inline u16 get_texel(u32 base_x, u32 base_y, int x, int y, const u32 *sheet) {
         y2 ^= 1024;
     }
     u32 offset = u32(((y2 / 2) * 512) + (x2 / 2));
-    u32 texel = sheet[(offset >> 1) & 0x7ffff];
+    u32 texel = guest_load<uint32_t>(sheet + ((offset >> 1) & 0x7ffff));
     if (offset & 1) texel >>= 16;
     if ((y & 1) == 0) texel >>= 8;
     if ((x & 1) == 0) texel >>= 4;

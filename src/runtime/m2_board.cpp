@@ -10,6 +10,7 @@
 // THIRD_PARTY.md.
 
 #include "runtime/m2_board.h"
+#include "runtime/guest_endian.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -434,15 +435,12 @@ void M2Board::tex_write(const Page &p, uint32_t addr, uint32_t lane_data) {
 uint32_t M2Board::fetch(uint32_t addr) {
     const Page &p = page(addr);
     if (p.kind != Rom && p.kind != Ram) throw Fatal("instruction fetch from a device");
-    uint32_t v;
 #ifdef M2_DC_MEMORY
     if (p.kind == Rom) {
-        std::memcpy(&v, M2_AL(rom_page(p) + (addr & 0xffc), 4), 4);
-        return v;
+        return guest_load<uint32_t>(M2_AL(rom_page(p) + (addr & 0xffc), 4));
     }
 #endif
-    std::memcpy(&v, M2_AL(p.base + (addr & 0xffc), 4), 4);
-    return v;
+    return guest_load<uint32_t>(M2_AL(p.base + (addr & 0xffc), 4));
 }
 
 uint8_t M2Board::read_byte(uint32_t addr) {
@@ -501,18 +499,14 @@ uint16_t M2Board::read_word(uint32_t addr) {
     addr &= ~1u;
 #ifdef M2_DC_SPEED
     if ((addr >> kPageBits) == fast_read_page_) {
-        uint16_t v;
-        std::memcpy(&v, M2_AL(fast_read_base_ + (addr & 0xfff), 2), 2);
-        return v;
+        return guest_load<uint16_t>(M2_AL(fast_read_base_ + (addr & 0xfff), 2));
     }
 #endif
     const Page &p = page(addr);
     const unsigned sh = (addr & 2) * 8;
 #ifdef M2_DC_MEMORY
     if (p.kind == Rom) {
-        uint16_t v;
-        std::memcpy(&v, M2_AL(rom_page(p) + (addr & 0xfff), 2), 2);
-        return v;
+        return guest_load<uint16_t>(M2_AL(rom_page(p) + (addr & 0xfff), 2));
     }
 #endif
     switch (p.kind) {
@@ -522,9 +516,7 @@ uint16_t M2Board::read_word(uint32_t addr) {
 #else
     case Rom: case Ram: case Tex: {
 #endif
-        uint16_t v;
-        std::memcpy(&v, M2_AL(p.base + (addr & 0xfff), 2), 2);
-        return v;
+        return guest_load<uint16_t>(M2_AL(p.base + (addr & 0xfff), 2));
     }
     case Dev: return uint16_t(dev_read(addr & ~3u, 0xffffu << sh) >> sh);
     default: return 0;
@@ -545,17 +537,13 @@ uint32_t M2Board::read_dword(uint32_t addr) {
 #endif
 #ifdef M2_DC_SPEED
     if ((addr >> kPageBits) == fast_read_page_) {
-        uint32_t v;
-        std::memcpy(&v, M2_AL(fast_read_base_ + (addr & 0xfff), 4), 4);
-        return v;
+        return guest_load<uint32_t>(M2_AL(fast_read_base_ + (addr & 0xfff), 4));
     }
 #endif
     const Page &p = page(addr);
 #ifdef M2_DC_MEMORY
     if (p.kind == Rom) {
-        uint32_t v;
-        std::memcpy(&v, M2_AL(rom_page(p) + (addr & 0xfff), 4), 4);
-        return v;
+        return guest_load<uint32_t>(M2_AL(rom_page(p) + (addr & 0xfff), 4));
     }
 #endif
     switch (p.kind) {
@@ -565,9 +553,7 @@ uint32_t M2Board::read_dword(uint32_t addr) {
 #else
     case Rom: case Ram: case Tex: {
 #endif
-        uint32_t v;
-        std::memcpy(&v, M2_AL(p.base + (addr & 0xfff), 4), 4);
-        return v;
+        return guest_load<uint32_t>(M2_AL(p.base + (addr & 0xfff), 4));
     }
     case Dev: return dev_read(addr, 0xffffffffu);
     default: return 0;
@@ -604,7 +590,7 @@ void M2Board::write_word(uint32_t addr, uint16_t data) {
     addr &= ~1u;
 #ifdef M2_DC_SPEED
     if ((addr >> kPageBits) == fast_write_page_) {
-        std::memcpy(M2_AL(fast_write_base_ + (addr & 0xfff), 2), &data, 2);
+        guest_store(M2_AL(fast_write_base_ + (addr & 0xfff), 2), data);
         return;
     }
 #endif
@@ -615,8 +601,8 @@ void M2Board::write_word(uint32_t addr, uint16_t data) {
 #ifdef M2_DC_SPEED
         fast_write(addr, p);
 #endif
-        uint16_t old; std::memcpy(&old, M2_AL(p.base + (addr & 0xfff), 2), 2);
-        std::memcpy(M2_AL(p.base + (addr & 0xfff), 2), &data, 2);
+        const uint16_t old = guest_load<uint16_t>(M2_AL(p.base + (addr & 0xfff), 2));
+        guest_store(M2_AL(p.base + (addr & 0xfff), 2), data);
         if (old != data) ram_written(addr & ~3u, uint32_t(data) << sh, 0xffffu << sh);
         return;
     }
@@ -639,7 +625,7 @@ void M2Board::write_dword(uint32_t addr, uint32_t data) {
 #endif
 #ifdef M2_DC_SPEED
     if ((addr >> kPageBits) == fast_write_page_) {
-        std::memcpy(M2_AL(fast_write_base_ + (addr & 0xfff), 4), &data, 4);
+        guest_store(M2_AL(fast_write_base_ + (addr & 0xfff), 4), data);
         return;
     }
 #endif
@@ -649,8 +635,8 @@ void M2Board::write_dword(uint32_t addr, uint32_t data) {
 #ifdef M2_DC_SPEED
         fast_write(addr, p);
 #endif
-        uint32_t old; std::memcpy(&old, M2_AL(p.base + (addr & 0xfff), 4), 4);
-        std::memcpy(M2_AL(p.base + (addr & 0xfff), 4), &data, 4);
+        const uint32_t old = guest_load<uint32_t>(M2_AL(p.base + (addr & 0xfff), 4));
+        guest_store(M2_AL(p.base + (addr & 0xfff), 4), data);
         if (old != data) ram_written(addr, data, 0xffffffffu);
         return;
     }

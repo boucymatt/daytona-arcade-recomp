@@ -354,13 +354,127 @@ Correctness is proven by lockstep differential testing against MAME, frame by fr
 
 ## Platform layer & build
 
+Physical framebuffer allocation/page mapping/readback/free now passes on
+hardware. This does not establish GPU ownership, command submission or scanout.
+The next milestone remains native presentation, not another memory probe.
+Do not submit Xenia's emulator-only swap packets or transplant libxenon's
+direct hardware initialization into a kernel-hosted XEX. A kernel-cooperating
+initialization/submission/completion/teardown contract must be established
+first, with a bounded color-bar presentation test before game integration.
+
+Display query now passes on hardware (640x480 front buffer, 1920x1080 output).
+Next validate owned contiguous physical buffer allocation/readback/free before
+any GPU submission. The SDK does not supply a complete presentation path;
+Xenia's initialization stub and emulator-specific swap commands cannot be used
+as native GPU initialization. Keep this prerequisite ROM-free and no-auto-exit.
+
+The reduced-stack 120-frame startup diagnostic now passes every reference
+hash on hardware, cleanup and parking; user returned to dashboard. Next is
+read-only display information ABI validation before GPU initialization.
+The pinned SDK lacks a complete presentation adapter and has incomplete Vd
+prototypes. A ROM-free query probe must not be represented as visible output
+or as resolving the earlier red-light report.
+
+Xbox shutdown isolation: quiet two-frame slicing still stops inside frame 1.
+The next controlled probe adds native 1 ms dispatch delays without checkpoint
+I/O, followed by a bounded 30-second post-cleanup heartbeat before CRT exit.
+State signatures must stay identical; hardware must distinguish in-frame
+failure from dashboard-return failure. Complete logs alone do not prove the
+console remained running. This diagnostic pacing is not a production scheduler.
+
+The paced two-frame hardware log now matches both hashes, finishes cleanup,
+and records all 30 hold seconds plus the pre-return marker. Shutdown is still
+reported. This narrows that run to after the final marker, not proof of the
+specific CRT/dashboard fault. Next: 120 reference frames, keeping frame 0
+unsliced and pacing frames 1 onward, then closing the log and sleeping without
+returning from main. Manual Guide exit remains a hardware test. No GPU/audio
+or production timing changes until longer execution is checked.
+
+The 120-frame paced hardware attempt matched frames 0 through 2, then crashed
+inside frame 3 before cleanup or parking. Exit-path investigation alone is
+insufficient. Next bounded probe retains earlier pacing but records detailed
+frame-3 dispatch/vblank/hash checkpoints and stops after four frames. Original
+frame hashes remain required; logging may mask the failure rather than fix it.
+
+The detailed hardware trace ends at Before vblank_end (count 0x94000,
+IP 0x53ec), without its matching return marker. The next probe instruments
+Video::screen_update and its tile decode/draw phases, rebuilding that object
+and retaining the same reference hashes. Instrumentation is opt-in under
+M2_XBOX360_VIDEO_TRACE and must not change rendering results.
+
+Video-trace hardware run completed palette, four tile decodes and entered
+layer composition, but never logged draw entry. Next instrumentation isolates
+the background clock, screen fill, sys24 clear and first draw boundary, with
+logged buffer addresses/sizes and diagnostic invariant checks before fills.
+
+Both fills and buffer invariant checks now pass on hardware; first draw entry
+does not appear. Its compiled prologue reserves 4304 bytes. The next isolated
+comparison puts the 4096-byte mask on the heap under an Xbox diagnostic flag,
+without changing Video layout. Host hashes and reduced prologue size must be
+checked; hardware success is required before attributing this fault to stack
+pressure. Other platforms retain the original mask storage.
+
+The reduced-stack four-frame hardware test now matches all four reference
+hashes, completes composition and cleanup, and reaches the final parking
+marker after 30 heartbeats. Manual Guide return succeeded. Next comparison
+retains the heap mask and pacing for 120 frames without detailed checkpoints;
+this separates longer execution from trace-I/O effects. It does not establish
+the cause of the earlier red light or prove gameplay stability.
+
 **Xbox 360 bring-up exception (2026-10-10).** An isolated OpenXeChain C boot
 probe lives in `platform/xbox360`; it does not link SDL or game code. The full
 port requires a C++20 runtime, explicit little-endian guest memory access on
 big-endian PowerPC, and verified native presentation/input/audio adapters.
 Initial rendering is planned to upload the existing CPU reference framebuffer,
 not fork shaders. See that directory's staged plan and hardware acceptance
-criteria. No Xbox gameplay or successful hardware boot is claimed.
+criteria. User-supplied Trinity logs now demonstrate boot/endian/filesystem
+checks and controller polling. User-supplied C++ logs also demonstrate the
+isolated no-exceptions/no-threads libc++ probe; it is not the game's C++ ABI.
+The native kernel thread/atomic/TLS probe also passed on hardware. A bounded
+compiler TLS adapter uses Clang's -femulated-tls lowering and kernel TLS;
+its initialization/isolation/destructor probe passed on the user's console
+after correcting truncated zero-fill in XEX packaging. The isolated patched
+compiler/ABI/unwinder probe passed typed catch, nested cleanup, rethrow and
+catch-all on Trinity. A further synthetic-data probe links actual cpu.cpp
+services with exception-enabled libc++ and compiler TLS has also passed on
+Trinity. The next isolated probe builds SoftFloat with host-correct extF80
+field layout and compares 57353 reference results/flags against a host oracle;
+its Xbox hardware run passed with checksum 8b69a75c2515064d. Board fetch/RAM
+access now uses explicit guest-endian helpers, and TGP/geometry ROM images
+are converted into native words. The real M2Board synthetic-memory probe passed
+on Trinity. CPU raster texture-RAM reads now decode guest-LE words, including
+the optimized quad fetch. A synthetic CPU-rendering probe compares pixel
+hashes and saves an image; all 16 hashes and 80000 texels passed on Trinity,
+and its PPM is byte-identical to the host reference. The next isolated test
+links the real generated daytona93 i960/TGP programs and free-run Lockstep,
+with the GameLoop frame-boundary rules, for 120 headless startup frames.
+The test compares architectural registers, RAM, TGP count and screen pixels
+against a host run. It neither substitutes board test guards nor enables
+network/audio/GPU presentation; unsupported trace-file/link use fails explicitly.
+This is a bounded portability comparison, not approval of the generated host-FP
+path for gameplay or full-race MAME parity. GPU presentation and Xbox FP
+fast-path parity remain unvalidated.
+The first real-ROM hardware test, launched from USB through Freestyle 3,
+loaded/verified all images and constructed the board, but the console shut
+down after the frame-zero entry log. No completed frame was recorded. A
+one-frame diagnostic now slices execution and flushes instruction-count/IP
+checkpoints; its host signature must match the unsliced reference before
+packaging. This does not establish the shutdown's cause or fix it.
+The first trace reached vblank-end and signature entry, but its 64-bit printf
+counts were actually phase-string addresses. Revision 2 uses only 32-bit
+format arguments and separates signature, reporting and teardown checkpoints;
+the host signature is unchanged. The prior result printf may itself have
+faulted on a misread string argument. Revision 2 has now passed the first-frame
+hash, result output, object destruction and TLS cleanup on the user's Xbox,
+without a reported fatal error. The next test restores all 120 startup frames
+with corrected logging; GPU presentation and gameplay remain unverified.
+That full startup hardware test passed frame 0 but shut down after entry to
+frame 1. The next bounded diagnostic leaves frame 0 unsliced and traces frame
+1, with both signatures required to match the host before packaging.
+The traced two-frame run passed both signatures and cleanup on the console.
+Next comparison keeps those instruction budgets but removes checkpoint I/O;
+success would narrow the failure, not prove a scheduling/timing root cause.
+No Xbox gameplay is claimed.
 
 One CMake project, C++20, SDL3 for window, input, haptics, audio and GPU, so platform-specific code stays under a few hundred lines. The user runs a first-launch importer that verifies their ROMs and generates the game code locally.
 

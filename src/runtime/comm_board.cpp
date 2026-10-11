@@ -10,14 +10,20 @@
 #include "runtime/comm_board.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cstring>
+#ifdef M2_XBOX360_HEADLESS
+#include <stdexcept>
+#else
+#include <chrono>
 #include <thread>
+#endif
 
 namespace rt {
 
 namespace {
+#ifndef M2_XBOX360_HEADLESS
 constexpr auto kSyncTimeout = std::chrono::seconds(3);
+#endif
 }
 
 CommBoard::Link CommBoard::link() const {
@@ -75,6 +81,9 @@ void CommBoard::lost() {
 
 void CommBoard::comm_tick() {
     if (linkenable_ != 0x01 || !transport_) return;
+#ifdef M2_XBOX360_HEADLESS
+    throw std::runtime_error("Xbox headless probe has no link transport");
+#else
     transport_->poll();
     const int frame_start = 0x2000;
     const int frame_size = shared_[0x13] << 8 | shared_[0x12];
@@ -235,6 +244,7 @@ void CommBoard::comm_tick() {
 
         zfg_delay_ = 0x02;
     }
+#endif
 }
 
 void CommBoard::read_fg() {
@@ -243,6 +253,9 @@ void CommBoard::read_fg() {
         return;
     }
     if (linkalive_ != 0x01 || !transport_) return;
+#ifdef M2_XBOX360_HEADLESS
+    throw std::runtime_error("Xbox headless probe has no link transport");
+#else
     const int frame_start = 0x2000;
     const int frame_size = shared_[0x13] << 8 | shared_[0x12];
     const int frame_offset = frame_start | shared_[0x15] << 8 | shared_[0x14];
@@ -274,6 +287,7 @@ void CommBoard::read_fg() {
             transport_->poll();
         }
     } while (linktimer_ == 0x01);
+#endif
 }
 
 // One whole frame into buffer0_: data_size, or 0 while it is not all here

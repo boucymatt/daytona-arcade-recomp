@@ -10,6 +10,7 @@
 // demand. See THIRD_PARTY.md.
 
 #include "runtime/m2_tgp_board.h"
+#include "runtime/guest_endian.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -30,7 +31,7 @@ uint32_t crc32_words(const std::vector<uint32_t> &w) {
 
 std::vector<uint32_t> words(const std::vector<uint8_t> &b) {
     std::vector<uint32_t> w(b.size() / 4);
-    std::memcpy(w.data(), b.data(), w.size() * 4);
+    guest_copy_words(w.data(), b.data(), w.size());
     return w;
 }
 } // namespace
@@ -91,7 +92,17 @@ void TgpBoard::fifo_w(uint32_t data) {
 }
 
 void TgpBoard::run_tgp() {
+#ifdef M2_XBOX360_HEADLESS
+    if (booted_) {
+        // Diagnostic-only ceiling: fail rather than leave Aurora stuck if
+        // generated PowerPC code never reaches an empty input FIFO.
+        const uint64_t limit = tgp_.count + 1000000;
+        tgpgen::run(tgp_, limit);
+        if (tgp_.count >= limit) throw TgpFatal("Xbox probe TGP instruction limit");
+    }
+#else
     if (booted_) tgpgen::run(tgp_, UINT64_MAX); // until it waits on an empty input FIFO
+#endif
 }
 
 uint32_t TgpBoard::fifo_r() {

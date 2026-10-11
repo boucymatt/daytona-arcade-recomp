@@ -1,5 +1,704 @@
 # Handoff
 
+## Xbox presentation investigation boundary (2026-10-11)
+
+Physical-buffer hardware log passes: virtual ffb2c000, physical 1fb2d000,
+1,228,800 bytes, every page mapping contiguous, zero byte mismatches, free
+completed and parking reached. Evidence: build/xbox360-current/hardware-framebuffer.log.
+Do not derive physical addresses from virtual pointer masking: this observed
+mapping differs by a page from that assumption; use MmGetPhysicalAddress.
+
+Next GPU presentation step is not implemented or uploaded. Rechecked the
+pinned SDK and open-source alternatives. Xenia VdInitializeEngines remains
+a stub with unresolved parameters and external microcode pointers; VdSwap
+writes an emulator-specific PM4_XE_SWAP packet. Free60 libxenon's xenos driver
+directly writes GPU/ANA/SMC registers and assumes its own hardware environment.
+It is not a drop-in kernel-cooperating XEX backend. No such code was copied.
+The earlier shutdown/red-light cause remains unresolved. Do not substitute
+another no-display allocation test for completion of the presentation step.
+
+Required before a console GPU submission:
+- Establish kernel-cooperating engine ownership, initialization and callback
+  ABI, with legally sourced prerequisites, without speculative arguments.
+- Validate ring allocation, cache/order rules, submission and completion with
+  timeouts; never free buffers until the GPU has demonstrably released them.
+- Establish scanout resource format, scaler/present parameters and Guide-safe
+  teardown before connecting CPU game pixels. First visible test is color bars.
+- Only after visible confirmation, connect the unchanged CPU reference image;
+  retain game hashes and keep audio/optimization separate.
+
+Existing XEX on the Xbox remains the passing physical-buffer probe. No new
+build, upload or launch was performed during this investigation.
+
+## Xbox physical framebuffer prerequisite (2026-10-11)
+
+Display-query hardware log passed output guards and reached parking. Reports
+640x480 front buffer, 1920x1080 output, refresh bits 0x42700000 (60 Hz).
+Raw evidence: build/xbox360-current/hardware-display.log. No presentation
+has been tested. Xenia's VdInitializeEngines is a stub with unresolved arguments;
+its VdSwap emits emulator-specific commands, not a native implementation.
+Do not transplant that code or guess initialization arguments on the console.
+
+Next isolated --framebuffer-probe allocates 1,228,800 bytes (640x480x4) with
+4096-byte alignment and write-combine protection. It checks every page's
+physical mapping, writes/reads an explicit byte pattern with a PPC sync barrier,
+frees the allocation and parks. No GPU submission, register access, display
+changes, ROMs or CRT exit. Log: xbox360-framebuffer.log. This is memory-path
+validation, not a display test or confirmation of a GPU pixel format.
+Native GPU initialization/scanout remains the presentation blocker.
+Built and mapped-image checked; 24 tooling tests and diff checks passed.
+Uploaded only default.xex, remote checksum verified:
+85f035b0e4a11c45367af047008bbf8653bc33a29c52f6a505daa4be401776de.
+Hardware run pending; no remote launch or ROM/log replacement.
+
+## Xbox display query prerequisite (2026-10-11)
+
+Hardware 120-frame reduced-stack log passes every reference hash, cleanup,
+30 heartbeats and parking. User returned to dashboard. Evidence remains in
+build/xbox360-current/hardware-120-frame.log. This is startup parity only.
+
+Next step is ROM-free display ABI discovery, not visible game presentation:
+build.py --sdk build-xbox360-sdk --display-probe --out build/xbox360-current.
+Installed SDK VdGetCurrentDisplayInformation lacks its pointer argument;
+an independent declaration and 0x58-byte output layout are based on the pinned
+BSD Xenia reference. Guarded static output storage avoids large stack frames.
+The probe logs before/after query, guards, dimensions/formats and raw output
+to xbox360-display.log, then parks without automatic CRT exit. It makes no
+GPU initialization, MMIO, clock, scaler or display-mode writes. Presentation
+is blocked on a verified native initialization/scanout path; do not call the
+SDK's incomplete GPU declarations speculatively. Earlier red-light cause is
+still unknown. This query requires hardware validation.
+Build and mapped-XEX checks passed, plus 23 tooling tests and diff checks.
+Uploaded only default.xex and verified remote readback SHA-256:
+ac7067471a1eab673d49ed858f7872e355fd38f775a8896a1b8544a1be227081.
+No launch performed; ROMs and prior logs retained.
+
+## Xbox longer reduced-stack comparison (2026-10-11)
+
+Retrieved the reduced-stack hardware log: all four frame signatures pass,
+including frame 3 CPU composition, runner destruction, TLS cleanup and all
+30 observation heartbeats. The final marker is parking without CRT exit.
+User returned through Guide to the dashboard. Saved evidence at
+build/xbox360-current/hardware-four-frame-pass.log. This supports the smaller
+draw-stack path for this bounded run, not a proven stack-overflow cause or
+an explanation of the earlier shutdown/red-light report.
+
+Next comparison: build_game_trace.py --paced-startup --small-draw-stack.
+It rebuilds video with the same heap mask but no detailed video checkpoints,
+runs 120 reference frames with existing pacing, and parks without automatic
+exit. Other platforms are unchanged. Hardware execution remains pending;
+no graphics presentation/audio or automatic remote launch is added.
+Validation: all 120 host ASan/UBSan frame hashes match the unchanged baseline;
+mapped-image/unwind checks pass (76 CIEs, 1126 live FDEs, 52 discarded), as do
+22 Python tests and git diff --check. New XEX SHA-256:
+a3695ea8c55e6921abf04ab1eba6c81bd2cff0c4673d1672e6b80781141e8a3b.
+Uploaded only default.xex to Hdd1/Games/Homebrew/Daytona and verified the
+downloaded copy matches this hash. ROMs/logs untouched; no remote launch.
+
+## Xbox tile draw stack comparison (2026-10-11)
+
+Latest retrieved hardware log: screen 0x483e0010, 190464 words; sys24
+0x484a0010, 192448 words. Both counts match and both fills finish. Last
+marker is Video after sys24 clear; before first draw. Draw entry is absent.
+Object disassembly shows draw's prologue reserves 4304 bytes before its first
+checkpoint, including a uint16_t mask[0x800] (4096 bytes). This supports a
+stack/call-entry investigation, not a confirmed stack-overflow diagnosis.
+--trace-video now also enables M2_XBOX360_SMALL_DRAW_STACK, moving that mask
+to a per-call RAII heap allocation without changing Video layout or other
+platform paths. Four-frame reference comparison remains required. This is a
+bounded diagnostic allocation strategy, not a claimed production optimization.
+Disassembly confirms stack frame reduced from 4304 to 208 bytes. Four host
+ASan/UBSan hashes, mapped XEX/unwind checks (76 CIEs/1129 FDEs) and 22 Python
+tests pass. Uploaded only default.xex to the same Xbox folder; readback SHA-256
+matches a545542e94120c5e9c5d7521c8651a7fb4eb6411e1b7cea956b84c2fd02b568d.
+No launch performed; console outcome pending. Mode line identifies tile draw
+mask on heap; small-stack comparison.
+
+
+## Xbox video buffer boundary trace (2026-10-11)
+
+Retrieved latest hardware log over the user's FTP after reported shutdown.
+Frame 3 passes palette and all four build_layer calls, then ends at Video
+before layer composition. No Video draw entry appears. Added v2 checkpoints
+before the background clock, before/after screen fill, before/after sys24
+clear, plus address/count/expected-size logging for both vectors. Incorrect
+buffer size/null data raises a caught diagnostic error before filling.
+No root cause or crash fix claimed: draw prologue remains a possibility, as
+do the fills or corrupt state. Same four-frame host reference required.
+V2 built: all four ASan/UBSan host hashes match, screen/sys24 counts are
+190464/192448 as expected; mapped XEX/unwind checks pass (76 CIEs, 1129 FDEs),
+22 Python tests pass. Replaced only default.xex in the Xbox Daytona folder;
+FTP readback SHA-256 matches local 476a487e1e4449f4ddd8619c0749f381fe5941921c7f9f95a88e2133109b28b6.
+ROM files unchanged; no launch performed. Next hardware log should identify
+buffer checks v2 in its mode header. Not a verified crash fix.
+
+
+## Xbox video-trace build restored (2026-10-11)
+
+Rebuilt missing isolated compiler/linker, exception runtime, host tools and
+real-game baseline from the existing pinned toolchain sources and owned ROMs.
+Baseline final 120-frame hash remains 23c8b9fbbbcea1b2. PPC REL24 check passes
+forward/backward >8 MiB and rejects overflow/misalignment. --trace-video now
+packages build/xbox360-current/default.xex successfully: four ASan/UBSan host
+hashes match, video phase checkpoints appear, mapped XEX/unwind checks pass
+(76 CIEs, 1128 live FDEs), and 22 Python tests pass. Console test pending.
+Runtime/generated baseline objects were rebuilt, not recovered bit-for-bit;
+baseline.json records the fresh objects plus instrumented runner/video hashes.
+Previous hardware trace is retained as xbox360-current/hardware-last.log.
+Deployed the new XEX and all six ROM images to the user's Xbox at
+Hdd1/Games/Homebrew/Daytona/. KDE directory access worked; its .part upload
+was rejected. Direct FTP in the authorized desktop context transferred files.
+Remote ROM sizes match local assets; downloaded XEX SHA-256 matches local:
+49b8bdea529ed337f539d5968003ed0e544855b46bff1ec009018d0e1e7a1c3f.
+No automatic launch performed. Next evidence is the console's new
+xbox360-game-trace.log, starting with CPU video phase checkpoints enabled.
+
+
+## Xbox frame-three video boundary (2026-10-11)
+
+Latest hardware trace stops at Before vblank_end, count 0x94000, IP 0x53ec.
+There is no After vblank_end. M2Board::vblank_end assembles VideoMem and calls
+Video::screen_update; crash localization now targets CPU composition, not exit.
+Added --trace-video: frame-three dispatch trace plus optional video checkpoints
+around palette/decode/build-layer/draw/raster/composite. Only runner and video
+objects are rebuilt against the baseline; other platform builds have no active
+trace hook. No rendering fix or new hardware pass claimed.
+
+Build was blocked: build/ contained only xbox360-current; retained compiler,
+runtime, baseline and generated sources from the prior cleanup were now absent.
+SDK, toolchain source and source ROM archives remain. Started rebuilding the
+isolated compiler and host game generation. Latest default.xex is STILL the
+previous fourth-frame probe until --trace-video successfully packages it.
+22 Python tests and video syntax checks (trace on/off) pass; new XEX pending.
+
+## Xbox build output consolidation (2026-10-11)
+
+User requested removal of accumulated builds and reuse of a single output
+folder. build_game_trace.py now writes every mode to build/xbox360-current.
+Latest fourth-frame artifacts moved there; missing default.xex regenerated
+from its existing validated package.exe. Six obsolete game diagnostic folders
+removed (trace, startup, second-frame, quiet-slice, paced-slice, paced-startup).
+Required xbox360-game baseline including ROMs, host tools/generated sources,
+compiler, SDK and runtime libraries are retained. Older paths below are history.
+
+## Xbox frame-three crash isolation (2026-10-11)
+
+Latest paced-startup log passes frames 0, 1 and 2 (frame 2 hash
+f18f5feeb7a625da, count 0x6f001, IP 0x16f8), then stops at Begin frame 3.
+User explicitly reports a crash, not shutdown on this run; a shutdown on retry
+is a prediction, not observed evidence. Cleanup/parking/CRT return were never
+reached. Thus the previous exit-path suspicion cannot explain all failures.
+
+Added --trace-fourth-frame: same unsliced frame 0, paced quiet frames 1 and 2,
+then detailed frame-3 checkpoints around dispatch, vblank and state hashing.
+Stops after four frames, retains post-cleanup hold and no automatic exit.
+Output build/xbox360-game-fourth-frame/default.xex; same ROMs and device log.
+Host validation rejects tracing in earlier frames and checks all four original
+hashes. Added logging changes latency/layout and may mask the fault; no fix
+claim. Native execution/Guide exit still require hardware testing.
+Built successfully: ASan/UBSan host run matches all four original hashes;
+trace confinement to frame 3 verified. XEX mapped extent/unwind checks pass
+(76 CIEs, 1127 live FDEs), and all 22 Python tests pass.
+
+
+## Xbox paced startup without automatic exit (2026-10-11)
+
+Latest supplied paced-two-frame log passes both original signatures, runner
+destruction, TLS cleanup and all 30 one-second hold checkpoints. Last line is
+Returning from main; CRT will request dashboard launch. User's standing report
+is shutdown with every log unless otherwise stated. That places this shutdown
+after the final marker; it does not prove which destructor/CRT/dashboard action
+causes it. Pacing success also does not establish why quiet slicing failed.
+
+Next build mode --paced-startup runs 120 reference frames, frame 0 unchanged,
+frames 1 onward sliced with native 1 ms delays. It retains 30 post-cleanup
+heartbeats, closes the log and parks in kernel sleeps without returning from
+main. Leave manually through Guide; no automatic return or poweroff request.
+Output build/xbox360-game-paced-startup/default.xex, same roms/ and device log
+xbox360-game-trace.log. No gameplay, GPU, audio or production scheduler claim.
+Final source rebuilt: all 120 host ASan/UBSan frame hashes match the original
+reference, ending at hash 23c8b9fbbbcea1b2. XEX mapped extent and unwind checks
+pass (76 CIEs, 1126 live FDEs); 22 Python tests pass. Native pacing, parking
+and manual Guide exit remain untested for this new build on the console.
+
+
+## Xbox paced-slice and exit observation (2026-10-11)
+
+Latest quiet-slice hardware log passes frame 0 then ends at Begin frame 1.
+User clarifies shutdown accompanies supplied logs, including complete logs
+unless explicitly stated otherwise. Earlier hash/cleanup PASS is not proof of
+safe dashboard return. Newlib crt0 calls exit after main, and _exit requests
+XamLoaderLaunchTitle(NULL, 0); this is not evidence of an intentional poweroff.
+
+Added --paced-second-frame: same quiet instruction slices, native 1 ms delay
+after each traced dispatch, then 30 one-second flushed heartbeats after TLS
+cleanup and an explicit marker before returning from main. Host skips kernel
+delays. Isolated output build/xbox360-game-paced-slice/default.xex; unchanged
+ROM folder and xbox360-game-trace.log. This compares pacing without per-slice
+USB writes and separates completion from CRT/dashboard return. Code layout
+also changes, so success would not prove a timing root cause. Hardware pending.
+Built successfully: host ASan/UBSan matches both reference frame hashes;
+XEX mapped extent and unwind validation passes (76 CIEs, 1126 live FDEs).
+All 22 Python tests pass. Native delays and exit observation require the next
+console run; the host oracle deliberately does not exercise kernel APIs.
+
+
+## Xbox quiet-slicing comparison (2026-10-11)
+
+User's two-frame hardware trace passes both original hashes, runner destruction,
+TLS cleanup and final PASS. Frame 1 succeeds when sliced with checkpoint I/O,
+where the unsliced startup build shut down after frame 1 entry. This does not
+yet establish the cause: logging latency, slicing and changed code generation
+are potential differences, not confirmed explanations.
+
+Added --quiet-second-frame. Retains unsliced frame 0 and identical frame 1
+instruction budgets (first 64 single instructions, then 1024 batches), but
+checkpoint() does no I/O. Only ordinary startup/frame results/cleanup messages
+remain. Mode marker identifies quiet second-frame slicing. Separate output
+build/xbox360-game-quiet-slice; device still writes xbox360-game-trace.log.
+Same ROM folder and baseline runtime/generated objects. No crash-fix claim.
+Host ASan/UBSan passed both reference signatures; mode marker verified and
+checkpoint messages absent. XEX mapped extent/unwind validation passes
+(76 CIEs / 1126 live FDEs / 52 discarded COMDATs). All 22 Python tests pass.
+Quiet-slicing hardware run remains pending. Earlier diagnostic XEXs preserved.
+
+## Xbox second-frame shutdown trace (2026-10-11)
+
+Full startup hardware log passes frame 0 (ea78bb6a56c2fbc5) then stops at
+Begin frame 1 ip=000016b4; user reports shutdown. No mismatch or final PASS.
+Added --second-frame to build_game_trace.py, mutually exclusive with --startup.
+Preserves the unsliced first frame; traces the first 64 instructions of frame
+1 individually, then batches up to 1024, and stops after that frame. Same
+hash/report/cleanup checkpoints and 32-bit-only formatting. Trace budgets are
+relative to the frame's starting instruction count, not zero. Output isolated
+in build/xbox360-game-second-frame; device log xbox360-game-trace.log, header
+says two frames. Same six ROM files. Diagnosis remains open; do not call this
+a shutdown fix or progress to GPU presentation before execution is stable.
+Host ASan/UBSan passed both reference hashes; frame 1 ends at count 0x4a001,
+IP 0x16b4, hash a0968dd6dbc7daef. XEX mapped extent and unwind checks pass
+(76 CIEs / 1127 live FDEs / 52 discarded COMDATs). 22 Python tests pass.
+Console execution remains pending. Previous binaries/ROMs preserved; no push.
+
+## Xbox first-frame hardware pass; full startup retest (2026-10-11)
+
+User reports no fatal error. Revision 2 xbox360-game-trace.log confirms frame
+0 hash ea78bb6a56c2fbc5 at count 0x25001/IP 0x16b4, result written, runner
+destroyed, TLS cleanup completed and final PASS on the USB/Freestyle 3 setup.
+The 32-bit-only logging removes the observed failure in this one-frame test;
+do not describe prior malformed count/IP fields as corrupted game state.
+
+Next: build_game_trace.py --startup reuses the same baseline objects and
+corrected runner, but disables instruction slicing/tracing and runs the full
+120 startup frames. Host signatures must match all 120 original reference
+values under ASan/UBSan before packaging. Output is isolated in
+build/xbox360-game-startup; copy its default.xex beside the existing roms
+folder and collect xbox360-game.log. No display/audio/input yet. This extends
+coverage to initial TGP startup; it is not attract-mode or gameplay proof.
+All 120 host ASan/UBSan signatures matched, ending at 11476993 instructions,
+443 TGP instructions and hash 23c8b9fbbbcea1b2. 22 Python tests pass. Packaged
+11214848-byte XEX passes mapped extent/unwind checks (76/1127/52); SHA256
+63f254bb40dce7bdfa3b4d8960d44bed9f7abbc7a46e644e82d9c91683e4e563.
+Full startup console test pending. First-frame trace binary preserved. No
+commit/push or installed SDK changes.
+
+## Xbox trace revision 2: diagnostic formatting (2026-10-10)
+
+User's first trace reaches both vblank-end markers and Before frame signature,
+then reports a fatal crash under Freestyle 3. Every displayed count equals
+the phase string's linked address (e.g. 2191523985 = 0x82a00091 for Before
+has_code), not a valid instruction count. The printed zero IP is likewise
+unreliable. Do not infer corrupted CPU state from these formatted values.
+The result printf also used two 64-bit arguments followed by a %s pointer;
+argument misreading there could itself cause the fatal crash, but this has
+not yet been confirmed on hardware.
+
+Revision 2 removes all 64-bit printf arguments from the game probe, emitting
+high/low unsigned 32-bit hexadecimal words instead. Adds flushed markers
+after registers, main RAM, work RAM, screen and TGP signature stages, around
+comparison/result formatting, runner destruction and TLS cleanup. Startup
+identifies revision 2. Same one-frame test and unchanged reference hash;
+still writes xbox360-game-trace.log. ROM files remain unchanged.
+Host ASan/UBSan run passed all signature/report/destruction stages, preserving
+ea78bb6a56c2fbc5 at count 0x25001/IP 0x16b4. All 22 Python tests pass. Packaged
+11214848-byte XEX passes mapped-image/unwind validation (76/1127/52).
+SHA256 cd4f7664026610cc0726d083c8dd910843cc5a92ab53090256bbb688a4da2bfe.
+Revision 2 console run remains pending; no claim the fatal crash is resolved.
+
+## Xbox first-frame shutdown investigation (2026-10-10)
+
+User ran the real game probe from USB through Freestyle 3 (not Aurora).
+xbox360-game.log verifies all six ROM images, constructs the board, and stops
+at `Begin frame 0 ip=00000860`. User reports console shutdown, not a normal
+dashboard return. No frame signature or completion marker exists. This is
+not a hardware pass. Loading via game: worked; no evidence blames USB/FSD.
+The first generated function's prologue reserves 7840 bytes; the PE requests
+1 MiB stack reserve / 4 KiB commit. These are static observations, not proof
+of a stack fault or actual kernel stack availability.
+
+Added build_game_trace.py: retain the original generated/runtime objects,
+record their hashes and baseline XEX hash, replace only the runner in a new
+build/xbox360-game-trace directory. Trace one frame, stopping generated code
+after each of its first 64 instructions and in 1024-instruction batches after
+that. Flush count/IP checkpoints before has_code, before/after dispatch,
+before/after both vblank phases and before hashing. No interpreter added.
+The separate log is xbox360-game-trace.log beside the XEX; existing roms
+folder remains usable. No screen/audio output expected. This is diagnostic
+instrumentation, not a claimed shutdown fix.
+Host trace passed ASan/UBSan and matches the original first-frame signature
+ea78bb6a56c2fbc5 at 151553 instructions, IP 0x16b4. Leak checking alone was
+disabled because this sandbox prevents its required ptrace operation; memory
+and undefined-behaviour instrumentation stayed enabled. The original linked
+first dispatch pointer equals the chunk_000 symbol (0x82010000); no static
+pointer mismatch found. New XEX mapped extent/unwind validation passed:
+76 CIEs, 1127 live FDEs, 52 discarded COMDATs. SHA256
+4a818aafbfc4128cca1d9c4d5eb0fb5da955062a64f9e10006ca28664add6b5d.
+22 Python tests and diff checks pass. Hardware run of trace XEX is pending.
+No commit/push; existing failing XEX and installed SDK left untouched.
+
+## Xbox real game startup probe (2026-10-10)
+
+User's xbox360-render.log passes all 80000 texels and 16 frame hashes on
+Trinity. Their xbox360-raster.ppm is byte-identical to the native reference
+(`/tmp/daytona-render-reference.ppm`). This closes the synthetic CPU raster
+hardware step, not GPU display or full game parity.
+
+Added --game-probe: verified daytona93 import, normal m2recomp/m2tgprecomp
+generation, 120-frame headless runner using actual M2Board, Cpu, free-run
+Lockstep, generated i960/TGP, geometry and CPU video. No board_probe_guards,
+interpreter, SDL, sound engine or transport. Scheduler copies GameLoop::probe
+boundaries (1024/110000/40000/2048), with bounded frames and no-progress checks.
+Compares fixed-byte-order register/RAM/screen/TGP-count signatures. This is a
+portability test of existing generated semantics, not Xbox native-FP approval.
+
+Host reference completed 120 frames: 11476993 i960 instructions, 443 TGP
+instructions, final IP 0x12f0, signature 23c8b9fbbbcea1b2. The early startup
+window is deliberate; it does not establish attract/race operation. No saves
+loaded or written. Missing ROM input fails explicitly. Imported files are
+size/hash-checked and staged as six .bin files (about 75 MiB) under ignored
+build/xbox360-game/roms. Generated code and all ROM-derived output stay ignored.
+
+M2_XBOX360_HEADLESS disables only unavailable IRQ-trace iostream loading and
+threaded link waits: these operations throw if requested. Real free-run and
+offline semantics remain; other targets do not define the macro. The default
+host runtime rebuild and test_comm_board pass; 21 Xbox Python tests pass.
+The larger executable initially failed the SDK linker's incorrect signed
+24-bit byte-range check for PPC REL24. Same-tree ELF checks signed 26-bit
+(LI is 24 bits in words). Added guarded COFF source patch (26-bit and aligned),
+an isolated linker stage and an actual-object branch regression. Installed
+SDK unchanged. TGP runs in the probe now also have a million-instruction cap.
+REL24 regression passed: decoded forward/backward targets beyond 9 MiB;
+overflow and unaligned destinations rejected. The SDK driver ignores --ld-path;
+use -B with the isolated linker directory (confirmed with -###), not that flag.
+Installed compiler/runtime fingerprint still matches. XEX built: 11214848
+bytes, SHA256 b5e9a07da3710048a1cd5766d8a0fc15f095892690989f34b28803d1ec9a351e.
+Image mapped extent and unwind checks pass: 76 CIEs, 1126 live FDEs, 52
+discarded COMDAT entries. Existing /align warning remains. Hardware execution
+of this game-startup build is NOT tested. 22 Python tests now pass, plus the
+ASan/UBSan headless callback/offline/unsupported-feature guard regression.
+The full 120-frame host game run also passed ASan/UBSan with no diagnostics;
+all 120 generated signatures are byte-identical to the Release oracle.
+No commit, push, SDK replacement or unrelated-platform package build performed.
+
+Next hardware input: copy build/xbox360-game/default.xex AND its roms folder
+to a new writable Aurora directory, launch, collect xbox360-game.log. No
+onscreen output/audio/input expected; exits after bounded test. After matching
+startup, extend real-code coverage and implement native framebuffer display.
+Do not reintroduce the synthetic board guards into this target. Do not claim
+complete gameplay, FP/MAME race parity, sound, or thread-safe libc++ yet.
+
+## Xbox synthetic CPU rendering probe built (2026-10-10)
+
+User's xbox360-board.log passed all ninth-stage checks and final completion on
+Trinity. Advanced to guest-endian CPU texture sampling: scalar get_texel and
+optimized read_texel_quad now use guest_load<uint32_t> instead of native word
+dereference. VideoMem documents byte-backed guest-LE texture storage. Existing
+little-endian behavior retained; no GPU/backend or game-generated code added.
+
+New --render-probe builds a host pixel oracle and Xbox render_probe.cpp with
+the actual src/runtime/raster.cpp, libc++ and TLS/exception support. Synthetic
+byte-patterned sheets, palette/xlat/luma arrays; no ROM-derived data. 80000
+packed-texel checks use an independent byte/nibble oracle. Sixteen nonblank
+frames test textured quads/triangles, checker shading, mirror flags, both
+sheets/origins and perspective. Fixed-byte-order hashes compared per frame;
+the final framebuffer is written to xbox360-raster.ppm (496x384 P6 RGB).
+Host reference PPM inspected: textured checker-shaded triangle, not blank.
+
+Host Release, ASan/UBSan and M2_VITA_RENDER_OPT hashes agree for all 16 frames.
+Existing test_vita_texel passes 2000000 footprints / 8000000 scalar samples.
+All 21 Python tests pass. Build/xbox360-render/default.xex is 790528 bytes,
+30 CIEs/715 live FDEs/5 discarded COMDAT records; mapped extent validated.
+SHA256 4c35f1017f9ca392f4ee09fe177852a0db35aaf7939cebb7d6735b25e1c17adf.
+Existing /align warning remains. Hardware rendering test pending: copy XEX
+to new writable Aurora folder; collect xbox360-render.log and xbox360-raster.ppm.
+No display output or input; intended dashboard return. No GPU screenshot,
+game boot, full MAME parity or Xbox fast-path approval claimed.
+
+Next: confirm hardware pixel hashes/image, integrate generated game code and
+real scheduling without board test guards, and add native presentation. Test
+images do not validate vblank/tile composition or actual game display lists.
+No SDK replacement, commit or push; platform binaries otherwise not rebuilt.
+
+## Xbox real board memory probe built (2026-10-10)
+
+User's xbox360-fp.log passed extF80 aggregate ABI and all 57353 reference
+checks/flags: hash 8b69a75c2515064d, zero known failures, final PASS on Trinity.
+
+Added guest_endian.h and used it in m2_board fetch/read/write, TgpBoard ROM
+word conversion and Geo polygon/texture ROM conversion. Little-endian path
+retains memcpy; big-endian path explicitly converts guest bytes. No root
+build changes. Rendering texture-RAM word views are not corrected by this.
+
+New --board-probe builds real M2Board, Video, Geo, TgpBoard, CPU/raster support
+with synthetic images (2 MiB program, 32 MiB main data, 8 MiB copro data,
+256 KiB tables, minimal geometry ROM). Probe-only link guards THROW if scheduled
+callbacks, linked cabinet operations or generated TGP execution are reached.
+They are never game backends and must not enter a gameplay target. No vblank.
+
+Checks pass on host ASan/UBSan (LSan disabled): construction, ROM fetch/order/
+mirrors/protection, 3520 RAM cases in 11 mapped regions, word/byte/dword writes,
+unaligned/page-crossing access, TGP ROM and masked buffer lanes, tile and
+texture mirrors/packing, device-fetch exception, destruction. CPU control RAM
+is a single page and intentionally excludes crossing its unmapped boundary.
+Existing geometry tests pass 100000 clipping cases and 6000 batch states
+(1411 kept polygons). All 21 Python tests pass. Physical board test pending.
+
+build/xbox360-board/default.xex: 856064 bytes, 44 CIEs/890 live FDEs/30 discarded
+COMDAT records; mapped image and board fetch/read/write coverage checked.
+SHA256 e6abca3d8d4534edd116a842a85b417822a52ab9579c068161eb4fd5a6278599.
+Existing /align linker warning. Copy only XEX to new writable Aurora directory
+and collect xbox360-board.log. No ROM/image/input; intended dashboard return.
+
+Next: confirm board hardware result, finish renderer texture-RAM word access
+and integrate real generated code/scheduler without test guards. Network and
+full thread-safe game runtime remain unfinished. No game boot/graphics/audio
+claim, no SDK replacement or git push. Other platform binaries not rebuilt.
+
+## Xbox big-endian SoftFloat probe built (2026-10-10)
+
+User's seventh-stage runtime log passed every stage and final completion on
+Trinity. Added --fp-probe, isolated softfloat/CMakeLists.txt/platform.h,
+build_fp.py and synthetic fp_cases/oracle/probe sources. Uses unchanged pinned
+SoftFloat and src/i960/fp.cpp. Shared root CMake and platform builds unchanged.
+Xbox has no LITTLEENDIAN definition; host oracle uses native field order.
+C and C++ share SOFTFLOAT_FAST_INT64 and compatible compiler TLS lowering.
+Target compilation rejects non-big-endian extF80 layout; runtime also checks
+f32_to_extF80's C-returned aggregate signExp/signif for 1.0.
+
+57353 reference results and exception flags hashed byte-wise (no ABI padding):
+9 known results plus 4096 special/random inputs across conversions, comparison
+and scaling in four rounding modes, scale -500..500. Native host Release and
+ASan/UBSan builds agree on 8b69a75c2515064d, zero known failures. LSan disabled.
+21 existing Python tests pass. Generated oracle header is under ignored build/.
+No exhaustive MAME check or Xbox fast-path validation claimed.
+
+build/xbox360-fp/default.xex: 724992 bytes; mapped extent valid; 54 CIEs,
+699 live FDEs, 5 discarded COMDAT records. Existing linker /align warning.
+Copy only XEX into a new writable Aurora directory and retrieve xbox360-fp.log.
+No ROM, image or input; intended dashboard return. Hardware FP test pending.
+
+Next: collect checksum/ABI result, then M2Board endian-safe memory and generated
+code integration. Audit found direct host memcpy loads/stores and texture-word
+casts in m2_board.cpp; do not treat the synthetic byte bus test as board parity.
+No board edits, graphics/audio, game boot, SDK replacement, commit or push.
+
+## Xbox real runtime services probe (2026-10-10)
+
+The user's xbox360-exception.log records typed catch, nested cleanup, rethrow,
+catch-all and completion PASS on Trinity. This supersedes the pending status
+for the sixth-stage exception probe below.
+
+Added --runtime-probe to build_exception_probe.py. Builds exception-enabled
+libc++ in the isolated ABI build and links unchanged src/runtime/cpu.cpp,
+bounded compiler TLS, exception regression and runtime_probe.cpp. Synthetic
+64 KiB byte bus, no ROM/interpreter/generated code. Tests reset state, 320
+aligned/unaligned guest little-endian access/flags cases, call depths 1..12
+with cache spill/restore, real Fatal string and libc++ out_of_range exceptions.
+Each log checkpoint closes before proceeding. TLS cleanup follows exception
+scope. Single thread; no general allocator/thread-runtime claim.
+
+Host synthetic cases pass ASan/UBSan (LSan disabled), native host TLS and stub
+kernel lifecycle only; they do not validate Xbox adapter integration. All 21
+Python tests pass. Extended image validator requires CPU-service FDE coverage.
+New build/xbox360-runtime/default.xex: 724992 bytes; full mapped extent checked;
+30 CIEs, 715 live FDEs, 7 discarded duplicate COMDAT records. SHA256:
+44a046d03074ed2e63157fd6bf61d70b35d909b10de4a39b1578e22140a0ac5d.
+Existing /align linker warning remains. Hardware test pending: copy to a new
+writable Aurora folder and collect xbox360-runtime.log. No picture or ROM;
+intended dashboard return. No SDK replacement, shared-platform edits or push.
+
+Next: collect integrated probe result, then endian-correct SoftFloat and
+M2Board/generated-code integration. Root SoftFloat build explicitly assumes
+LITTLEENDIAN=1; do not reuse that configuration unchanged for big-endian PPC.
+No 3D rendering/audio/gameplay or full runtime boot is established.
+
+## Xbox exception probe built; hardware test pending (2026-10-10)
+
+Completed isolated patched Clang build and rebuilt libc++abi/libunwind with
+DWARF exceptions and unwind tables enabled for both C and C++. In addition to
+the type-reference crash, PowerPC COFF streamer omitted emitFrames(nullptr);
+prepare_exceptions.py now reproduces that fix too. Runtime builds clean their
+generated output and stamp the compiler hash to prevent stale objects.
+
+build_exception_probe.py produces build/xbox360-exception/default.xex,
+659456 bytes, SHA256:
+dd163d97d567e50b3849f30e999f283c467a4d5b261ff10cd52e7dbcf2b2318b.
+Link still warns about /align without /driver. check_exception_image.py checks
+big-endian CIE/FDE structure, code/personality/LSDA pointers, frame markers and
+coverage of main, cases, nested throw, __cxa_throw and _Unwind_RaiseException.
+23 CIEs, 654 live FDEs, five zero-address discarded COMDAT records. The end
+marker requires .eh_frame$ZZZ; plain .eh_frame placed it before archive frames.
+All 20 Python tests pass, including mutation checks for frame validation.
+Full mapped XEX size validated with the passing TLS packaging repair.
+
+Copy only this XEX into a new writable Aurora folder and collect
+xbox360-exception.log. START is closed before throwing; completion should
+report typed catch/nested cleanup/rethrow/catch-all PASS. No picture, ROM or
+input; intended dashboard return. Hardware exceptions are NOT tested yet.
+No gameplay, shared-platform changes, installed SDK replacement or git push.
+
+### Investigation history for this step
+
+The user's replacement xbox360-tls.log confirms compiler TLS initialization,
+alignment, worker/main isolation, both joins and 3 constructors/3 destructors
+PASS on Trinity. This supersedes the hardware-pending notes below.
+
+This step implements isolated single-threaded C++ exception support, not gameplay.
+prepare_exceptions.py pins LLVM and guards unrelated edits; it replaces the
+Xbox printer's erroneous XCOFF type-reference emission with the common
+format-aware implementation and enables Xbox COFF aliases in libunwind.
+build_exceptions.py builds a separate compiler/runtime without replacing SDK.
+The compiler rebuild is in build/xbox360-llvm-eh; log /tmp/daytona-eh-build.log.
+Runtime was rebuilt with that compiler before the exception XEX was made.
+
+Preliminary old-compiler libc++abi/libunwind archives link with static frame
+markers and the bounded aligned_alloc shim, but emit NO usable unwind tables.
+Do not package build/xbox360-abi/exception-unverified.exe or use those archives
+as evidence of exception support. The new builder/validator above replaces
+this initial link-only experiment. Hardware execution still needs testing.
+
+exception_cases.cpp passes 1000 typed-catch/cleanup/rethrow/catch-all cycles
+on the host under ASan/UBSan. The allocation shim passes 320 allocation cases
+plus invalid/unsupported alignment checks. These checks do not establish Xbox
+exception support.
+
+## Xbox TLS packaging repair after hardware crash (2026-10-10)
+
+User reported Fatal Crash Intercepted and no xbox360-tls.log. The screenshot
+does not locate the fault. Artifact inspection found a concrete packaging
+defect: PE SizeOfImage=393216 but SynthXEX mapped basefile=327680. The final
+.data section has VirtualSize 0x12534 with only 0x600 raw bytes. The pinned
+mapper copies raw data and pads only its final raw page, omitting a required
+64 KiB zero-filled page. This is a strong crash candidate, not hardware proof.
+
+Added package_image.py: creates generated package.exe from smoke.exe with
+zero-fill materialized into raw section data before invoking SynthXEX. RVAs
+and initialized content are preserved. The original PE, external SDK and TLS
+code are untouched; SynthXEX computes descriptors/hashes over the full image.
+Post-package validation now requires the uncompressed mapped payload to match
+PE SizeOfImage, in addition to XEX2/PE signatures. This is specific to the
+pinned uncompressed SynthXEX output, not a generic compressed XEX validator.
+
+Rebuilt build/xbox360-tls/default.xex: 397312 bytes including 4096-byte header,
+393216-byte payload. SHA256:
+f6fd35412e23ee24393636971d25932690ad76aed3ef75b218f34e44ffd9af23.
+Four packaging fixture tests and eight orchestration tests pass: preserved
+content/RVAs, zero fill, idempotence, malformed/overlap rejection and missing
+XEX-page rejection. Hardware retest pending; do not claim the crash is fixed.
+
+## Xbox compiler TLS adapter and probe (2026-10-10)
+
+User's xbox360-thread.log records both worker joins/TLS checks, main isolation,
+atomic total 32768, handle closes, TLS free and completion PASS on Trinity.
+Advanced to actual compiler thread_local lowering with -femulated-tls; no
+game emulation or shared-global substitution. New isolated tls_runtime.cpp
+uses the proven kernel TLS API, no heap, bounded per-thread arenas and explicit
+thread cleanup. Descriptor layout checked against pinned compiler-rt emutls.c.
+Four contexts, 32 descriptors/destructors, 16 KiB per context, alignment <=256.
+Static XEX only; no module unload, general std::thread integration or exceptions.
+
+New --tls-probe builds build/xbox360-tls/default.xex (331776 bytes), SHA256
+518d6ed300064f80a616d61b8dc30fcb5fe42d1afc0c0040c9a1cbe5bf32d330.
+Compiler emits adapter/destructor registration calls; assembly has no tprel
+access or .tls$ section. Tests cover zero/constant/dynamic initialization,
+alignment/isolation/main preservation and three thread-exit destructors.
+Worker rendezvous prevents false pointer-reuse failures. Joins are bounded;
+no TLS shutdown under unjoined workers. Hardware execution is still pending.
+
+Host tests: 200 worker lifecycles with isolation, alignment, reverse destructor
+order, arena reuse, busy-shutdown refusal and reinitialization pass ASan/UBSan;
+leak checking disabled due sandbox. Invalid size/alignment abort as intended.
+Eight builder tests pass. Other platform/game sources and SDK unchanged.
+
+Exception investigation: forced -fdwarf-exceptions -funwind-tables crashes in
+PPCXbox360AsmPrinter::emitTTypeReference, which tries an XCOFF TOC section on
+the PE/COFF path. This is in addition to the prior SjLj selection failure.
+No compiler patch/unwinder has been implemented; adding libc++abi alone is
+not sufficient. Next: collect xbox360-tls.log, implement the compiler's
+exception emission/unwinder, then guest-endian/game/presentation integration.
+
+## Xbox native thread/TLS gate (2026-10-10)
+
+User's xbox360-cxx.log has PASS for all six checks and the completion marker:
+static constructors, aligned allocation/overflow, vector/sort/span, string
+copy, RAII and sqrt are now demonstrated on Trinity. No full ABI/game claim.
+
+Inspected actual compiler output before attempting to link an unwinder.
+Normal full-abi.obj has .text/.rdata/.data/.bss/.tls$ but no unwind tables;
+PPCCOFFMCAsmInfo never selects an exception format. -fsjlj-exceptions fails
+with Cannot select EH_SJLJ_SETUP_DISPATCH. Adding ABI libraries alone is not
+enough. thread_local emits r2-relative calls@tprel, not a verified Xbox TLS
+sequence. Do not execute it blindly or replace TLS with shared globals.
+
+Added a separate C --thread-probe using SDK declarations and public Xenia
+reference for return semantics. Two workers, 64 batches each of 256 atomic
+increments, distinct kernel TLS sentinels, main TLS preservation, bounded
+joins and handle cleanup. No allocation/stdio in workers; SDK malloc remains
+unsafe for concurrent use. Timeout path retains static worker contexts/TLS
+until process teardown. Not std::thread/compiler TLS/C++ exception support.
+Built build/xbox360-thread/default.xex; console execution remains pending.
+SHA256: c4519a179033fea34ac236afc4edf56f0aba7d78a0a05c983d255b1c5dbfebad.
+Import inspection confirms ExCreateThread, ExTerminateThread, KeTls APIs and
+NtWaitForSingleObjectEx; disassembly includes lwarx/stwcx and memory barriers.
+Seven builder tests pass. Existing platform sources and SDK are unchanged.
+Next: retrieve xbox360-thread.log; compiler exception lowering/unwinder and
+compiler TLS adaptation still need implementation before game integration.
+
+## Xbox 360 hardware evidence and restricted C++ probe (2026-10-10)
+
+User supplied xbox360-boot.log: endian PASS and filesystem write/read-back
+PASS. xbox360-input.log: slot zero status 0 throughout recorded polling,
+steering 32..224 with neutral 128, both pedals 32..224, changing button masks;
+slots 1..3 status 1167. These establish native boot and input on the user's
+Trinity, not graphics/gameplay, hotplug or a confirmed dashboard return.
+
+Built an isolated static libc++ from the already-pinned LLVM source using
+build_libcxx.py. No host C++ library, SDK source edit, or shared-platform
+change. Added --cxx-probe packaging: build/xbox360-cxx/default.xex, 397312
+bytes, PowerPC/32-bit Xbox PE plus XEX2 checked. Hardware testing pending.
+SHA256: 5027068a4f24affaf618ce591d25f2726af9a5e25547be95d9ca33553559b0c8.
+Probe logs constructors, allocation alignment/overflow, vector/sort/span,
+heap strings, RAII and math; includes a flushed final completion marker.
+
+Failures/workarounds: Generic CMake produced two libc++.a Ninja rules even
+with shared disabled (excluded shared target); distinct shared output fixes
+this. Function sections produced undefined symbols in object files, including
+std::__throw_bad_alloc; disabling function/data sections for libc++ resolves
+the restricted link. Later -isystem libc++ headers lost ordering to the SDK's
+C headers; -I fixes wrapper ordering. Upstream aligned allocation references
+missing _memalign_r; probe-only new/delete retain original malloc pointers
+for aligned free, check overflow, and abort on throwing allocation failure.
+This is not thread-safe and does not implement new-handler semantics.
+
+Six builder tests and 40 aligned allocation cases plus overflow/array
+checks pass on host with UBSan. Restricted library and probe also build/package
+from a fresh separate directory using the checked-in scripts. The full
+exception/TLS probe compiles with the generated headers but still cannot link
+__cxa_allocate_exception, __cxa_throw, catch/RTTI and allocation symbols.
+The restricted library explicitly disables exceptions/RTTI/threads; do not
+mistake it for the full C++ runtime or remove shared game exceptions to fit.
+Next: collect xbox360-cxx.log, then complete/test ABI/unwinding/TLS/threads,
+guest endian parity, presentation/audio and game integration in that order.
+
 ## Xbox 360 initial audit and boot probe (2026-10-10)
 
 Created xbox360 from the current clean main; no other branch was changed.

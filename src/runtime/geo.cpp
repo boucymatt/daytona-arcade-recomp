@@ -10,6 +10,7 @@
 // src/runtime/geo.h and THIRD_PARTY.md.
 
 #include "runtime/geo.h"
+#include "runtime/guest_endian.h"
 
 #include <algorithm>
 #include <bit>
@@ -43,8 +44,8 @@ Geo::Geo(const std::vector<uint8_t> &polygons, const std::vector<uint8_t> &textu
     if (polygon_rom_.empty() || (polygon_rom_.size() & (polygon_rom_.size() - 1)) || texture_rom_.empty() ||
         (texture_rom_.size() & (texture_rom_.size() - 1)))
         throw GeoFatal("bad polygon or texture ROM image");
-    std::memcpy(polygon_rom_.data(), polygons.data(), polygon_rom_.size() * 4);
-    std::memcpy(texture_rom_.data(), textures.data(), texture_rom_.size() * 2);
+    guest_copy_words(polygon_rom_.data(), polygons.data(), polygon_rom_.size());
+    guest_copy_words(texture_rom_.data(), textures.data(), texture_rom_.size());
     raster_.texture_rom = texture_rom_.data();
     raster_.texture_rom_mask = uint32_t(texture_rom_.size() - 1);
     geo_.raster = &raster_;

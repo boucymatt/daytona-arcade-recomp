@@ -11,20 +11,55 @@ Vendored checkouts live in git-ignored `extern/` and are never committed.
 ## Xbox 360 build-time toolchain
 
 OpenXeChain is used externally; none of its implementation is copied here.
+The isolated LLD build also fixes PPC COFF REL24's range check: its 24-bit
+word displacement is a signed 26-bit byte displacement, matching LLVM's
+ELF PowerPC implementation. Misaligned targets are rejected. The installed
+SDK linker is unchanged; `check_branch_linker.py` exercises forward/backward
+branches beyond 8 MiB and rejection of overflow/unaligned targets.
 The smoke executable uses the public-domain xecorelib declarations and newlib.
 SynthXEX is an external host packaging tool, not linked into the executable.
 Retain SDK licence notices when distributing SDK/runtime binaries.
+The compiler-rt `emutls.c` descriptor layout is also read as an ABI reference
+for our bounded kernel-TLS adapter; no implementation is copied. It uses the
+same LLVM pin and licence recorded below.
+Experimental exception work additionally builds libc++abi/libunwind externally
+from that LLVM pin. `prepare_exceptions.py` replaces the Xbox assembly printer's
+XCOFF type-reference path with common format-aware emission, flushes frame
+records in the PowerPC COFF streamer, and enables COFF alias handling for Xbox
+in libunwind. These are isolated source/build changes;
+the installed SDK is not overwritten. Isolated exception/runtime probes have
+passed on Trinity; full game and multithreaded ABI support remain unvalidated.
+
+The isolated Xbox SoftFloat probe builds the pinned, unmodified SoftFloat
+sources listed below using portable primitives and host-correct byte order.
+Its C/C++ TLS accesses use the bounded Xbox adapter. No upstream source or
+shared-platform SoftFloat configuration is modified.
 
 | Component | Upstream | Pinned commit | Licence / use |
 | --- | --- | --- | --- |
 | Buildscript | https://github.com/OpenXeChain/buildscript | `eed1fa65bf9577fd31625764b320a90182ea9ade` | MPL-2.0; external build orchestration, unmodified |
-| LLVM | https://github.com/OpenXeChain/llvm | `890b83f6c8259a8899e182a5f7d9cf39c64131cc` | Apache-2.0 with LLVM exceptions and component notices; compiler/linker/builtins |
+| LLVM | https://github.com/OpenXeChain/llvm | `890b83f6c8259a8899e182a5f7d9cf39c64131cc` | Apache-2.0 with LLVM exceptions and component notices; compiler/linker/builtins, static libc++, and experimental libc++abi/libunwind; exception and REL24 source patches described above |
 | Newlib | https://github.com/OpenXeChain/newlib | `f929633c27099d404e9cb5b2739a9c7f9b6afccc` | Per-file licences (see upstream COPYING.NEWLIB); C runtime/syscalls |
 | xecorelib | https://github.com/OpenXeChain/xecorelib | `c65d67e071357acade681f04c46ae9719797f239` | CC0; kernel/XAM headers and import library |
 | SynthXEX | https://github.com/OpenXeChain/synthxex | `48d1453a55468aa2f8a211db0b20edd594ef5be3` | AGPL-3.0-or-later, bundled library notices; external host tool only |
 | Xenia `src/xenia/kernel/xam/xam_input.cc`, `src/xenia/hid/input.h` | https://github.com/xenia-project/xenia | `95a5c3ee250f80c3b9d139658649d9ffb6db3eec` | BSD-3-Clause; read-only reference for XamInputGetState's signature and packet layout, no implementation copied |
+| Xenia `src/xenia/kernel/xboxkrnl/xboxkrnl_threading.cc` | https://github.com/xenia-project/xenia | `95a5c3ee250f80c3b9d139658649d9ffb6db3eec` | BSD-3-Clause; read-only reference for thread creation/termination and kernel TLS return values, no implementation copied |
 
 ## Existing components
+
+Presentation investigation only: Free60Project/libxenon
+(`https://github.com/Free60Project/libxenon`), revision
+`c32c813c3d630ae922f83395ee4509b0468af71d`, BSD-3-Clause as recorded in
+`libxenon/LICENSE`. Read `libxenon/drivers/xenos/xenos.c` and `xenos.h` to
+assess direct-register initialization versus the XEX kernel environment.
+No implementation copied or linked; no libxenon hardware initialization used.
+
+Xbox display-query ABI reference: Xenia `src/xenia/kernel/xboxkrnl/xboxkrnl_video.cc`
+at `95a5c3ee250f80c3b9d139658649d9ffb6db3eec` (same upstream above,
+BSD-3-Clause). Read-only reference for VdGetCurrentDisplayInformation's
+pointer argument and 0x58-byte output layout; no implementation copied.
+The same pinned Xenia revision's `xboxkrnl_memory.cc` was read for physical
+allocation/free/address-query argument semantics (BSD-3-Clause, no code copied).
 
 | Component | Upstream | Commit | Licence | Use | Changes |
 | --- | --- | --- | --- | --- | --- |

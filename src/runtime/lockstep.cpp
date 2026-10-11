@@ -2,12 +2,20 @@
 
 #include <cinttypes>
 #include <cstdio>
+#ifndef M2_XBOX360_HEADLESS
 #include <fstream>
 #include <sstream>
+#endif
 
 namespace rt {
 
 Lockstep::Lockstep(Cpu &core, const std::string &path) : core_(core) {
+#ifdef M2_XBOX360_HEADLESS
+    // The isolated Xbox runtime has no locale/iostream support. Free-run
+    // scheduling below is unchanged; trace replay is not part of this probe.
+    (void)path;
+    throw std::runtime_error("Xbox headless probe does not support IRQ trace files");
+#else
     std::ifstream f(path);
     if (!f) throw std::runtime_error("cannot open " + path);
     std::string line;
@@ -29,6 +37,7 @@ Lockstep::Lockstep(Cpu &core, const std::string &path) : core_(core) {
     core_.on_take = on_take;
     core_.on_take_ctx = this;
     refresh_next();
+#endif
 }
 
 // The next count at which boundary() must act: an event to apply, or a
