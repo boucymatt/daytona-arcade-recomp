@@ -354,6 +354,38 @@ Correctness is proven by lockstep differential testing against MAME, frame by fr
 
 ## Platform layer & build
 
+PS3 bring-up exception: platform/ps3 contains an isolated PSL1GHT display/input
+probe, initially presenting CPU-written pixels through RSX display buffers.
+It requires no shaders or SDL port. Validate hardware display/exit first, then
+cross-platform game hashes before integration. Installed GCC 7.2 cannot compile
+the C++20 runtime; a separate compatible toolchain is a prerequisite. Xbox
+exception/TLS implementation is platform-specific, not a PS3 ABI solution.
+The display probe now has photographic hardware confirmation. An isolated
+upstream-patched GCC 13.2 toolchain builds/links C++20 and packages a basic
+exception/main-thread TLS probe; these checks now pass on hardware, including
+Cross input and clean exit. All 120 startup hashes now match on physical PS3.
+The next test presents 600 host-checked CPU frames through RSX display buffers,
+with original 4:3 aspect and explicit exit after holding the final frame.
+HUD presentation has photographic confirmation; corrected PS3 plane
+normalization now matches all 600 startup hashes on hardware. Next measure
+game/render and presentation time with diagnostic hashing/tracing disabled.
+Full gameplay and audio integration remain open.
+The installed GCC 7.2 SDK remains unchanged.
+
+RSX hardware rendering begins with an isolated --rsx-probe (bounded GPU
+clear/scissor surfaces, no CPU color-buffer writes). Validate its visible
+output and exit before adding textured geometry. The software game path stays
+available as reference. Desktop SDL_GPU storage-buffer shaders require a PS3
+backend adaptation. The host Cg dependency is now available in ignored build
+storage; original test shaders compile. A bounded textured quad is the next
+hardware check after confirmed GPU color bars, before game integration.
+Textured quad and depth-order tests now have hardware/visual confirmation.
+The --rsx-game diagnostic next draws real projected game polygons using a
+synthetic texture, without CPU 3D rasterization. Window scissors are implemented
+in revision 36 pending hardware validation. Texture decoding and tile/HUD
+composition remain required before output equivalence.
+This bring-up test is not a hardware-rendered game or a 60 FPS result.
+
 Physical framebuffer allocation/page mapping/readback/free now passes on
 hardware. This does not establish GPU ownership, command submission or scanout.
 The next milestone remains native presentation, not another memory probe.

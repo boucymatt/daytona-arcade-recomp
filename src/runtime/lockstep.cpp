@@ -75,7 +75,13 @@ bool Lockstep::apply() {
         if (e.kind == Event::Call) {
             const size_t fn = e.fn; // the callback may add events (e moves)
             ++next_;
-#ifdef M2_DC_MEMORY
+#if defined(PS3_GAME_PROBE) && !defined(M2_DC_MEMORY)
+            // A callback may schedule its successor. Move it out before that
+            // insertion can grow calls_, and recycle the consumed slot.
+            auto call = std::move(calls_[fn]);
+            calls_[fn] = nullptr;
+            call();
+#elif defined(M2_DC_MEMORY)
             // Each callback runs once: take it out (it may add the next one,
             // which can reuse its slot) and free the slot.
             auto call = std::move(calls_[fn]);
@@ -119,7 +125,14 @@ void Lockstep::add_callback(uint64_t at, std::function<void()> fn) {
     Event e{};
     e.kind = Event::Call;
     e.count = at;
-#ifdef M2_DC_MEMORY
+#if defined(PS3_GAME_PROBE) && !defined(M2_DC_MEMORY)
+    // Only pending callbacks retain slots; long hardware runs must not keep
+    // every callback ever invoked. No class-layout change for generated code.
+    e.fn = 0;
+    while (e.fn < calls_.size() && calls_[e.fn]) ++e.fn;
+    if (e.fn == calls_.size()) calls_.push_back(std::move(fn));
+    else calls_[e.fn] = std::move(fn);
+#elif defined(M2_DC_MEMORY)
     if (!free_calls_.empty()) {
         e.fn = free_calls_.back();
         free_calls_.pop_back();

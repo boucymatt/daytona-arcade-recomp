@@ -17,6 +17,10 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#ifdef M2_RASTER_DIAGNOSTICS
+extern bool geometry_trace_active();
+extern void geometry_clip_diagnostic(const char *, const uint32_t *, unsigned);
+#endif
 
 namespace rt {
 
@@ -267,6 +271,14 @@ static int32_t clip_polygon(GeoVertex *v, int32_t num_vertices, GeoVertex *vout,
 			out[outcount].pz = cur->pz + ((v[nextvert].pz - cur->pz) * scale);
 			out[outcount].pu = cur->pu + ((v[nextvert].pu - cur->pu) * scale);
 			out[outcount].pv = cur->pv + ((v[nextvert].pv - cur->pv) * scale);
+#ifdef M2_RASTER_DIAGNOSTICS
+            if (geometry_trace_active()) {
+                const uint32_t values[] = {uint32_t(i), f2u(curdot), f2u(nextdot), f2u(scale),
+                    f2u(out[outcount].x), f2u(out[outcount].y), f2u(out[outcount].pz),
+                    f2u(out[outcount].pu), f2u(out[outcount].pv)};
+                geometry_clip_diagnostic("edge", values, sizeof(values) / sizeof(values[0]));
+            }
+#endif
 			outcount++;
 		}
 
@@ -495,6 +507,19 @@ void Geo::model2_3d_process_polygon(raster_state *raster, uint32_t attr)
 		for (int i = 0; i < 4 && clipped_verts; i++)
 		{
 			const auto &clip_plane = raster->clip_plane[raster->center_sel][i];
+#ifdef M2_RASTER_DIAGNOSTICS
+            if (geometry_trace_active()) {
+                uint32_t values[46] = {uint32_t(i), uint32_t(clipped_verts),
+                    f2u(clip_plane.normal.x), f2u(clip_plane.normal.y),
+                    f2u(clip_plane.normal.pz), f2u(clip_plane.distance)};
+                for (int n = 0; n < clipped_verts && n < 8; ++n) {
+                    values[6 + n * 5] = f2u(verts_in[n].x);
+                    values[7 + n * 5] = f2u(verts_in[n].y);
+                    for (int p = 0; p < 3; ++p) values[8 + n * 5 + p] = f2u(verts_in[n].p[p]);
+                }
+                geometry_clip_diagnostic("input", values, 6 + std::min(clipped_verts, 8) * 5);
+            }
+#endif
 			// Most polygons are wholly inside a plane. Preserve the same dot
 			// comparisons while avoiding the edge walk and vertex copies.
 			if (polygon_inside_plane(verts_in, clipped_verts, clip_plane))

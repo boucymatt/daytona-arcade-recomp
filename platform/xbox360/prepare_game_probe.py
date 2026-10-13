@@ -6,9 +6,9 @@ import subprocess
 RUNTIME = ('cpu', 'm2_board', 'm2_tgp_board', 'tgp', 'geo', 'video', 'raster', 'lockstep', 'comm_board', 'enhance')
 
 
-def prepare_game(root, out):
+def prepare_game(root, out, host_name='xbox360-host-tools', frames=120, raster_diagnostics=False):
     repo = Path(__file__).resolve().parents[2]
-    host = root / 'xbox360-host-tools'
+    host = root / host_name
     subprocess.run(['cmake', '-S', str(repo), '-B', str(host), '-G', 'Ninja',
                     '-DCMAKE_BUILD_TYPE=Release', '-DM2_ROMSET=daytona93'], check=True)
     subprocess.run(['cmake', '--build', str(host), '--target', 'm2import', 'm2recomp',
@@ -48,7 +48,8 @@ def prepare_game(root, out):
     # Use the same isolated feature boundaries for host and target.
     oracle = out / 'host-game-oracle'
     subprocess.run(['clang++', '-std=c++20', '-O2', '-fno-fast-math', '-ffp-contract=off',
-                    '-DM2_XBOX360_HEADLESS', '-DXBOX_GAME_HOST_TEST', '-I', str(repo / 'src'),
+                    *(['-DM2_RASTER_DIAGNOSTICS'] if raster_diagnostics else []),
+                    '-DM2_XBOX360_HEADLESS', '-DXBOX_GAME_HOST_TEST', f'-DGAME_PROBE_FRAMES={frames}', '-I', str(repo / 'src'),
                     '-I', str(out), str(repo / 'platform/xbox360/game_probe.cpp'),
                     *map(str, sources), '-o', str(oracle)], check=True)
     with (out / 'host-game.log').open('w') as log:

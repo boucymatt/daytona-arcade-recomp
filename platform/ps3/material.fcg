@@ -1,0 +1,33 @@
+float4 main(float4 colour : COLOR0, float2 native_pixel : TEXCOORD0,
+            float4 texture_mapping : TEXCOORD1, float4 bounds : TEXCOORD2,
+            float4 modes : TEXCOORD3, uniform sampler2D image, uniform sampler2D shades) : COLOR {
+    // Native 496x384 pixel parity, independent of output resolution.
+    float parity = frac((floor(native_pixel.x) + floor(native_pixel.y)) * 0.5);
+    if (colour.a > 0.5 && parity < 0.25) discard;
+    // Base-level nearest sampling diagnostic. Filtering/microtextures follow.
+    if (texture_mapping.w > 1.5) {
+        float2 p = floor(texture_mapping.xy / texture_mapping.z);
+        float2 segment = floor(p / bounds.zw);
+        float2 local = p - segment * bounds.zw;
+        if (modes.x > 0.5 && frac(segment.x * 0.5) > 0.25) local.x = bounds.z - 1.0 - local.x;
+        if (modes.y > 0.5 && frac(segment.y * 0.5) > 0.25) local.y = bounds.w - 1.0 - local.y;
+        p = bounds.xy + local;
+        if (p.x >= 1024.0) {
+            p.x -= 1024.0;
+            p.y += frac(floor(p.y / 1024.0) * 0.5) > 0.25 ? -1024.0 : 1024.0;
+        }
+        // The upload cache has already unpacked the guest words into indices.
+        // Preserve offset carry for texture widths larger than one physical row.
+        float carry = floor(p.x / 1024.0);
+        p.x -= carry * 1024.0;
+        p.y += carry * 2.0;
+        p.y -= floor(p.y / 4096.0) * 4096.0;
+        float2 address = float2(p.x + modes.z * 1024.0, p.y);
+        float nibble = floor(tex2D(image, (address + 0.5) / float2(2048.0,4096.0)).r * 15.0 + 0.5);
+        if (texture_mapping.w > 2.5 && nibble > 14.5) discard;
+        float row=floor(modes.w/16.0);
+        float column=(modes.w-row*16.0)*16.0+nibble;
+        colour.rgb=tex2D(shades,float2(column+0.5,row+0.5)/float2(256.0,4096.0)).rgb;
+    }
+    return float4(colour.rgb, 1.0);
+}

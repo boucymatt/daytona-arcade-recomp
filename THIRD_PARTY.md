@@ -47,6 +47,38 @@ shared-platform SoftFloat configuration is modified.
 
 ## Existing components
 
+## PS3 development environment
+
+Isolated toolchain upgrade uses https://github.com/ps3dev/ps3toolchain at
+e13aa539c07abe86cdbcd095dc1340492dbca213 (BSD-2-Clause scripts), its unmodified
+GCC 13.2 PS3 patch (GCC GPL-3.0-or-later, runtime library exception) and newlib
+1.20 PS3 patch (component licenses). External sources/builds stay under build/.
+Compiler archive SHA-256 e275e76442a6067341a27f04c5c6b83d8613144004c0413528863dc6b5c743da;
+newlib archive SHA-256 c644b2847244278c57bec2ddda69d8fab5a7c767f3b9af69aa7aa3da823ff692.
+Uses upstream pinned fallback config scripts (NO_SAVANNAH=1), host Clang,
+and a copy of the installed SDK/binutils. No system SDK installation changes.
+Host-only compatibility configuration disables MPFR float128 detection and
+keeps old newlib makedoc pointer/int conversion diagnostics as warnings via
+CFLAGS_FOR_BUILD. No target compiler/runtime source changes beyond upstream
+PS3 patches are applied.
+
+NVIDIA Cg Toolkit 3.1 April 2012: https://developer.nvidia.com/cg-toolkit-download.
+Host-only unmodified libCg.so dependency of PSL1GHT cgcomp, proprietary NVIDIA
+license retained at build/ps3-cg/usr/local/Cg/docs/license.txt. Not linked into
+or distributed with the PS3 package. Archive SHA256:
+e8ff01e6cc38d1b3fd56a083f5860737dbd2f319a39037528fb1a74a89ae9878.
+
+PSL1GHT: https://github.com/ps3dev/PSL1GHT, MIT. Public RSX/video/pad/sysutil
+headers are used from the installed /usr/local/ps3dev SDK; its precise source
+revision is not recorded by that installation. The installed rsx/rsx.h SHA-256
+is 2cc262f35c467cdfe190e28f550941624f67105cc3d1878faa950815ae7f06de.
+Upstream sample/API reference revision: f649a08fd536a9e27c08c7db2d93a2d7ee4c3bbe
+(rsxtest main.cpp/Makefile inspected; no implementation copied). Linked SDK
+libraries: rsx, gcm_sys, io, sysutil, rt, lv2. Compiler is installed PPU GCC 7.2;
+SELF/SFO/PKG tools are externally invoked from the SDK. No SDK sources vendored.
+
+## Other references
+
 Presentation investigation only: Free60Project/libxenon
 (`https://github.com/Free60Project/libxenon`), revision
 `c32c813c3d630ae922f83395ee4509b0468af71d`, BSD-3-Clause as recorded in

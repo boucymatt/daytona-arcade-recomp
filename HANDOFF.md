@@ -1,5 +1,751 @@
 # Handoff
 
+## PS3 span reuse and obsolete metadata uploads (2026-10-12)
+
+Revision 53 completes 14100 logged frames and normal exit; user confirms correct
+HUD/background. Revision 54 caches span geometry against the exact 12288-word
+scroll/window snapshot, independently of tile and palette changes. Identical
+snapshots reuse existing RSX vertices. Also removes obsolete per-frame register
+and full palette uploads: the colour shader now only reads pen zero there.
+Pen zero updates when the palette changes, while coloured tile invalidation
+remains unchanged. RSX_LAYERS now reports span_rebuilds. This targets measured
+3.4 ms layer work on unchanged frames; hardware benefit not yet established.
+The single-return shader remains untouched. Audio is still absent.
+
+## PS3 coloured-tile shader timeout isolation (2026-10-12)
+
+Revision 52 hardware log records flip timeout before 60 frames. Revision 53
+changes only the layer shader's backdrop selection from an early return to
+two samples plus lerp/step and one return, leaving the coloured atlas allocation,
+uploads, spans and renderer ordering unchanged. Earlier revision 45 also timed
+out with a combined early-return shader, but correlation is not a diagnosis.
+This controlled test checks that hypothesis; no crash fix claimed until tested.
+Audio remains absent and the larger atlas/upload tradeoff is still unmeasured.
+
+## PS3 coloured tile cache (2026-10-12)
+
+User confirms revision 51 background/HUD appearance. Revision 52 expands tile
+pens into cached RGBA variants: transparent category 0/1, opaque category 0,
+and opaque any category. The fragment shader now samples colour and discards
+zero alpha, removing per-pixel pen decode/category tests/dependent palette
+lookup. Palette changes invalidate all cached rows; tile changes invalidate
+their row bands. Atlas increases from 4 to 16 MiB RSX memory. This may increase
+upload cost during palette changes; measure before claiming a win. Synthetic
+C tests exhaust every pen/category/variant, including opaque black. No change
+to span selection or 3D shaders. Hardware performance remains unverified;
+audio remains absent.
+
+## PS3 batched tile spans (2026-10-12)
+
+Revision 50 regressed to 11.1 FPS: tile uploads are 0.14-0.31 ms but flip waits
+82-86 ms even before geometry. The full-screen register-decoding shader is too
+expensive in this test. Revision 51 moves scroll/window/split selection to CPU
+span preparation, merges contiguous/vertical regions, and submits all background
+rectangles then all foreground rectangles in two batched draws around 3D.
+The fragment shader only samples indices, checks category/transparency and
+looks up palette color. No CPU tile pixel composition. Capacity is 32768
+rectangles with explicit failure on overflow, about 15 MiB CPU staging and
+15 MiB additional RSX vertices. Source coordinates split at texture wrapping.
+Synthetic coverage tests verify normal-mode scroll/wrap and no overlaps/gaps;
+split-mode arithmetic tests remain. Hardware appearance/performance unverified.
+Audio remains absent. Do not reuse revision 50 full-screen shader as a fast path.
+
+## PS3 GPU System-24 composition (2026-10-12)
+
+Revision 50 switches the PS3 runtime to desktop external-3D snapshots, bypassing
+CPU tile composition. RSX layers.fcg adapts the shared m2.hlsl layer selection,
+scroll, split, category, transparency and window-mask rules using float integer
+arithmetic and texture-backed tables. Four decoded pixmaps occupy a 512x2048
+RGBA atlas; changed tile-row generations select uploads. A 256x64 texture holds
+4096 pens and 12288 snapshot words. Back and front are separate draws with the
+existing geometry between them. Palette/register data updates every frame;
+tile pixels only when dirty. Isolated layer/material programs remain separate.
+Synthetic tests compare float split/wrap/mask arithmetic to integer rules;
+this is not pixel parity or a hardware speed result. Must verify menus, HUD,
+sky, scrolling and frame timings on PS3. Audio and exact 3D shading still open.
+
+## PS3 layer comparison and static-quad cost (2026-10-12)
+
+Revision 48 reaches 10620 logged frames and normal exit; user confirms HUD and
+background correctness. Composition-copy timing is zero. Late layer upload
+windows remain 4.3-4.7 ms. Revision 49 replaces memcmp with aligned 32-bit pixel
+comparisons and initializes the constant layer quads only once, instead of
+rewriting them in RSX memory every frame. No shader or composition changes.
+A host C test checks equality and every individual bit in each of 496 pixels.
+This is an optimisation experiment, not a measured speed gain until hardware
+testing. Audio and exact 3D material fidelity remain unfinished.
+
+## PS3 direct background composition (2026-10-12)
+
+Revision 47 reaches at least 9120 frames and exits normally. Late windows
+upload 1525-5731 of 46080 possible rows; layer upload still costs 3.8-4.1 ms,
+CPU tile drawing 9.6-10.5 ms, and composition about 1.9-2.0 ms. Revision 48
+enables the existing zero-margin direct background draw path for PS3_RSX_GAME
+as well as Dreamcast: draw onto the pen-zero-cleared screen instead of clearing
+sys24, drawing there and copying nonzero pixels back to screen. Foreground,
+RSX shaders, row cache, controls and other platforms are unchanged. This reuses
+the existing implementation but still needs PS3 visual/performance validation.
+Audio remains absent; lighting/filtering remain approximate.
+
+## PS3 exact layer row upload cache (2026-10-12)
+
+User confirms revision 46 background/HUD are correct; log passes 3540 frames
+and exits normally. Revision 47 keeps composition and shader output unchanged.
+It compares source rows in CPU memory, uploads only changed rows, converts in
+CPU scratch storage, and copies contiguous rows to RSX rather than alternating
+per-pixel writes between two distant layers. Cache costs about 1.5 MiB CPU RAM;
+initial rows always upload, including all-zero transparent rows. New RSX_LAYERS
+timing reports upload cost and changed rows. CPU composition remains unchanged
+and expensive; no performance gain claimed until hardware measurement. Audio
+remains absent. Existing flip synchronization is preserved for all uploads.
+
+## PS3 layer shader isolation after flip timeout (2026-10-12)
+
+Revision 45 hardware log records flip timeout before its first 60-frame
+checkpoint. This is a genuine presentation regression, not a manual exit.
+Revision 46 separates the simple tile sampling fragment program from the 3D
+material program; each pass explicitly binds its program and texture, including
+the case where both programs use sampler zero. This isolates the combined
+shader branch; it does NOT establish the root cause or prove a fix. Layer
+vertex ranges fit the allocation and the linked draw routine accepts 24-bit
+start indices. Build validation must be followed by hardware log/photo.
+
+## PS3 background and HUD composition (2026-10-12)
+
+Revision 44 log reaches at least 4920 frames and exits normally by user request.
+Revision 45 bypasses the external System-24 GPU shortcut only for PS3_RSX_GAME,
+allowing existing CPU reference composition to produce back/front tile layers.
+RSX uploads them after flip completion into a 512x1024 atlas (2 MiB), draws the
+background before geometry and transparent foreground after it. The layer
+quads reserve 12 extra vertices outside the bounded geometry region and do not
+write depth. This restores the missing presentation path, pending hardware
+verification; CPU layer composition can reduce performance. Approximate 3D
+lighting/filtering remain. Audio is still absent: the probe Runner neither
+loads sound assets nor owns SoundBoard or a PS3 audio-output worker. Its native
+sound sequencer must be connected separately, not represented as completed.
+
+## PS3 gameplay input integration (2026-10-12)
+
+Revision 44 feeds port-one controller input into the real board each frame.
+Select coin, Start start, left stick/D-pad steering, Cross/R2 gas, Square/L2
+brake, R1/L1 edge-triggered gears, Triangle/Circle views, L3 test, R3 service.
+Select+Start exits before issuing coin/start. Pad state persists across empty
+packets and releases on disconnect. Presentation no longer consumes the same
+pad packets. Manual/XMB exits are normal, not a rendering failure. The current
+36000-frame limit remains. Needs physical input/menu/race validation; missing
+tile/HUD layers can still hide menus, audio remains absent, and lighting and
+filtering remain approximate. This is not yet a complete playable port.
+
+## PS3 extended viewing run (2026-10-12)
+
+Revision 43 extends only --rsx-game from 600 to 36000 frames: ten minutes at
+60 FPS, longer at lower throughput. Select+Start still exits early. Checked
+software/reference runs stay at 600 frames; Xbox and other platforms unchanged.
+Performance header now prints the actual limit. Rendering is unchanged from
+revision 42; this is a duration change, not a performance or fidelity fix.
+The initial build caught the 600-frame oracle-length assertion. That guard now
+excludes PS3 performance mode, which already disables hash comparisons; checked
+reference runs retain the assertion and their original validation requirements.
+
+## PS3 decoded texture-index cache (2026-10-12)
+
+Revision 41 completes 600 frames. No uploads occur during 3D frames; busy
+scenes spend 17-20 ms in flip waiting, not texture upload (zero), vertex copy
+(0.7-0.9 ms), or submission (~0.03 ms). This points to rendering/refresh cost,
+not a pure GPU timestamp measurement. Revision 42 removes packed-byte/nibble
+selection from fragments: generation-cached uploads expand both sheets into
+a 2048x4096 RGBA index atlas (32 MiB, previously 4 MiB). The remaining shader
+preserves address carries/wrapping and existing approximate shading. No uploads
+on empty geometry frames, avoiding repeated expansion during initial ROM load.
+The first nonempty frame can incur an upload stall. Timing instrumentation
+remains; test performance and appearance on hardware before claiming a gain.
+Host address tests compare old/new word and nibble selections across row/RAM
+boundaries. Per-texel lighting, filtering, tile/HUD layers and audio remain open.
+
+## PS3 texture-path cost isolation (2026-10-12)
+
+Revision 40 completes 600 hardware frames. Photos confirm recognizable game
+textures, with missing sky/HUD and approximate lighting. Tree-heavy frames
+180-419 take about 32-33 ms/frame, versus about 16.7 ms late in the run.
+Do not infer shader cost from display timing alone: it includes flip waiting.
+Revision 41 leaves rendering unchanged and logs 60-frame RSX_TIMING windows:
+flip wait, generation-cached texture upload, vertex copy/sync, command submit,
+upload count/bytes, and vertex/batch counts. These are CPU-observed timings,
+not GPU timestamp measurements; wait includes vblank and GPU completion.
+Use this breakdown to select the next optimisation without guessing. Existing
+texture filtering/lighting and layer/audio limitations remain unchanged.
+
+## PS3 packed texture RAM sampling (2026-10-12)
+
+Revision 39 completed 600 frames on hardware, with a photo showing perspective
+checker patterns on road and cars. Revision 40 replaces synthetic checkers with
+base-level nearest texture RAM sampling. A 4 MiB RGBA atlas holds both packed
+guest-LE sheets; the fragment shader decodes the selected byte/nibble. Uploads
+are generation-cached and occur after the previous flip completes. Vertex data
+adds texture origin/size/mirror/sheet state (80-byte stride, maximum 10 MiB).
+Texture index 15 discards on translucent textured materials. Lighting is still
+an approximate index modulation, NOT the reference luma lookup. Bilinear/mip/
+microtexture filtering, full wrap edge behavior, layers/HUD and audio remain
+absent. Synthetic host tests check packed nibble selection; shader compilation
+and package checks do not establish hardware appearance or game parity.
+
+## PS3 perspective texture-coordinate diagnostic (2026-10-11)
+
+Revision 38 hardware log completes all 600 frames, with approximately 60 Hz
+partial-renderer throughput and zero CPU raster time. No new photo, so material
+masking visual correctness remains unconfirmed. Revision 39 adds the original
+game u/z, v/z and 1/z interpolants and fragment division, retaining synthetic
+ordering depth and window scissors. Textured materials show a shaded checker
+in actual game UV space; solid materials retain palette lighting. This is NOT
+actual game texture decoding. Vertex stride is now 48 bytes, bounded at 131072
+vertices (6 MiB). Nonfinite texture interpolants reject the polygon. Hardware
+verification must check road checker perspective and seams; texture RAM,
+filtering, per-texel lighting, tile/HUD layers and audio remain open.
+
+## PS3 checker material masking test (2026-10-11)
+
+Revision 37 completes 600 frames; user photo confirms flat palette-lit cars
+and track. Textured surfaces remain approximate and are not visually faithful.
+Revision 38 adds two reference material rules: renderer 1 solid-translucent
+polygons draw nothing; checker flag discards even native-pixel parity in the
+fragment shader before depth writes. Native pixel coordinates interpolate
+from projected geometry, retaining 496x384 pattern scale at larger output.
+Other textured transparency, actual texture decode/filtering/luma, backgrounds
+and HUD remain unimplemented. Shader compile/package and five tests do not
+prove hardware discard/depth behavior; request photo/log before proceeding.
+
+## PS3 palette-lit geometry test (2026-10-11)
+
+Revision 36 log completes 600 frames at roughly 60 Hz in sampled geometry-only
+windows. No new photo provided, so clipping visual correctness remains open.
+Revision 37 replaces synthetic checker mapping in --rsx-game with per-polygon
+palette/color-translation/gamma lighting using the original solid equations.
+Textured polygons are flat material approximations, NOT decoded game textures.
+Vertex format is position4/color4 (32 bytes), isolated RSX test remains the
+working textured quad. Window clipping/depth order unchanged. No HUD/layers or
+audio. Next implement actual texture sampling and layer composition; do not
+call this complete hardware rendering or infer finished-game 60 FPS.
+
+## PS3 window-clipped hardware geometry (2026-10-11)
+
+Revision 35 completed 600 frames with zero CPU raster time and approximately
+60 Hz geometry-only throughput; photo confirms checker-covered game shapes.
+This omits real textures/layers and is not complete-game 60 FPS evidence.
+Revision 36 batches consecutive polygons by their original viewport rectangle,
+uses the desktop/reference render-offset equations and transforms half-open
+clip edges to RSX scissors in the 4:3 content area. Vertex ranges are bounded
+before submission. Geometry/depth order is unchanged; no real texture/HUD yet.
+Cross-build and existing unit tests are separate from pending hardware visual
+validation. Next connect game texture decoding and background/HUD composition.
+
+## PS3 real geometry RSX diagnostic (2026-10-11)
+
+Revision 34 completes all 300 frames with alternating near/far submission;
+user confirms near orange triangle over checkerboard. Revision 35 --rsx-game
+connects Video external_3d and real sorted/projected polygon fans to RSX.
+CPU 3D raster disabled; 600-frame bounded performance run with synthetic
+checker mapping, no game texture decoding, no tile/HUD composition, no
+per-window scissor yet. This is geometry integration, NOT gameplay fidelity.
+Original 4:3 aspect retained. Vertex staging bounded at 131072 vertices, reused
+only after previous flip completion. RSX depth uses draw-order rank, like the
+desktop GPU path. No audio. Hardware geometry output and exit need testing.
+Next implement per-window clipping and game textures/layers before claiming
+equivalent output or using diagnostic timings as a finished-game FPS result.
+
+## PS3 textured depth-order test (2026-10-11)
+
+Revision 33 log completed 300 submissions/return path; user confirms orange/
+cyan checkerboard visible. Textured shader draw now visually confirmed.
+Revision 34 adds Z16 clear, LESS depth test/write and a near orange triangle
+over the far checkerboard. Reverses submission order every 60 frames; output
+must stay unchanged. Same bounded 300-frame test, no game rendering yet.
+Visible stable occlusion and clean exit still require hardware validation.
+
+## PS3 textured RSX geometry test (2026-10-11)
+
+Revision 32 hardware log submitted 300 frames and reached XMB return; user
+confirmed visible color bars. Revision 33 adds original passthrough vertex and
+texture fragment shaders, a six-vertex quad and a 64x64 orange/cyan checker.
+All drawing uses RSX, CPU only initializes texture/vertex resources. Still
+isolated from ROM/game, bounded 300 frames. Requires visual/hardware validation.
+Host cgcomp now works using public NVIDIA Cg 3.1 libCg.so kept in ignored
+build/ps3-cg, not installed system-wide or packaged. Shader binaries generated
+under build/. GetAttribIndex declarations lacked linked implementations; use
+GetAttrib plus checked index instead. Cross-build/package and five tests pass.
+Next: verify checkerboard quad, then game geometry/textures and composition.
+
+## PS3 RSX render-target bring-up (2026-10-11)
+
+User requests hardware rendering. Revision 32 adds isolated --rsx-probe:
+GPU clears/scissors draw eight color bars and a moving gray rectangle into
+double-buffered RSX surfaces. No CPU framebuffer writes in this mode, no ROMs,
+no shader or game geometry. Bounded to 300 flips with callback/pad exit and
+flip timeout; visual output/clean exit require hardware validation. This is
+render-target infrastructure, NOT a completed hardware game renderer.
+Desktop GPU path uses SDL_GPU storage buffers; it cannot be transplanted
+unchanged. Installed cgcomp reports Unable to load Cg; shader dependency must
+be resolved before shader-based textured geometry. No proprietary console SDK
+used. Next: validate surface writes, then shaders/textured geometry, then game
+integration against software reference. Do not claim 60 FPS from this test.
+
+## PS3 lighting timing and 60 FPS boundary (2026-10-11)
+
+hardware-lazy-shade-parity-v30.log confirms all 600 reference hashes PASS.
+Revision 31 measures unchanged lazy polygon shades using --performance,
+without hashes/traces. Compare with revision 29. Hardware speed pending.
+User explicitly targets 60 FPS: total budget 16.67 ms; revision 29 sampled
+raster alone is 58-88 ms. Do not present incremental CPU gains as sufficient.
+Next architectural milestone: isolated RSX textured draw with completion/exit
+validation, then native game polygon/texture support and composition, retaining
+software output as reference. Installed PSL1GHT has rsx headers and cgcomp;
+that is tooling evidence only, not proof of shader compatibility or gameplay.
+No GPU rendering implementation or 60 FPS claim in this package. Audio/input
+integration and full-race parity remain open.
+
+## PS3 lazy polygon shade test (2026-10-11)
+
+Revision 29 completes: raster 86555 / 87980 / 57996 us at frames 180-239 /
+240-299 / 540-599 versus revision 27 86930 / 88541 / 58966 us; small changes.
+Revision 30 adds a polygon-local 128-bit validity mask to reuse lazily computed
+lighting results on short spans. Long spans retain the existing full table.
+Same integer lighting equations, no shared or persistent cache, no FP changes.
+Private Extra grows by 16 bytes; Raster layout unchanged. Reference parity
+must pass before timing; performance benefit is not established.
+
+## PS3 loop unrolling performance test (2026-10-11)
+
+hardware-unroll-parity-v28.log confirms all 600 reference hashes PASS on PS3.
+User reports it is still slow. Revision 27 performance is only about 8-11 FPS
+in sampled 3D windows (123494 / 92429 us total frame at 180-239 / 540-599).
+Revision 29 measures unchanged loop unrolling using --performance, removing
+hash/trace overhead and retaining comparable span timers. Compare to revision
+27; do not attribute parity-mode wall time to runtime performance. Small CPU
+changes have not closed the gap to 60 FPS; larger rendering architecture work
+needs investigation, not a claim that this test enables GPU rasterization.
+
+## PS3 raster loop unrolling test (2026-10-11)
+
+Revision 27 completes: raster 86930 / 88541 / 58966 us at frames 180-239 /
+240-299 / 540-599 versus revision 25 91368 / 92984 / 61158 us (about 4-5% less).
+Keep integer coordinate conversion. Revision 28 tests -funroll-loops for
+raster.cpp only; strict FP, no contraction and all other flags stay unchanged.
+Unrolling is experimental: code-size/instruction-cache cost can outweigh loop
+overhead savings. First run 600-frame reference parity; speed not yet measured.
+
+## PS3 integer coordinate performance test (2026-10-11)
+
+hardware-coordinate-parity-v26.log confirms all 600 reference hashes PASS on
+PS3. Revision 27 switches unchanged coordinate conversion to --performance,
+without reference hashes/traces. Compare with revision 25 to measure the
+conversion change. All other renderer and compiler settings remain unchanged.
+Speed benefit awaits hardware; startup parity is not full-race validation.
+
+## PS3 integer coordinate conversion test (2026-10-11)
+
+Revision 25 completes: raster 91368 / 92984 / 61158 us at frames 180-239 /
+240-299 / 540-599 versus revision 23 92794 / 94804 / 62310 us. Retain byte reads.
+Revision 26 tests IEEE binary32 bit-based truncation for PS3 to_s32 only,
+preserving INT32_MIN for NaN/out-of-range and signed zero/subnormal handling.
+No changes to perspective FP arithmetic. Host ASan/UBSan passes 4,003,072
+comparisons (all exponent/sign combinations at mantissa edges plus random
+patterns); five Python tests pass. Initial test compile needed initializer_list
+include, now corrected. 600-frame hardware parity and speed still pending.
+
+## PS3 byte texel performance test (2026-10-11)
+
+hardware-byte-texel-parity-v24.log confirms all 600 reference hashes PASS on
+physical PS3. Revision 25 switches unchanged byte texel reads to --performance
+without accuracy hashes/traces. Compare against revision 23 for the texture
+read change; compiler settings, lighting tables, mip caching and covered-span
+rejection are unchanged. Speed benefit pending hardware; startup parity is
+not a full-race validation.
+
+## PS3 byte texel parity test (2026-10-11)
+
+Revision 23 completes. Tile drawing at frames 240-299 drops from 10403 to
+9438 us; composition rises from 5413 to 5574 us. Retain strict O3 video.
+Revision 24 changes only PS3 scalar texel fetch to read the selected byte
+directly from little-endian texture storage, avoiding a full word endian swap.
+Original folded address/mask and local coordinate nibble selection stay exact.
+Host ASan/UBSan passes 8,388,608 comparisons covering all packed addresses,
+wraparound and parity combinations. Five Python tests pass. Console 600-frame
+parity and speed remain pending, following Platform layer & build validation.
+
+## PS3 strict O3 video performance test (2026-10-11)
+
+hardware-video-o3-parity-v22.log confirms all 600 reference hashes PASS on PS3.
+Revision 23 switches unchanged rendering to --performance without reference
+hashes/traces. Compare tile_draw and composite against revision 21 to measure
+video.cpp's compiler change. Raster remains strict -O3; other units -O2.
+Five existing unit tests and package validation are checked separately from
+pending hardware timings. Startup parity does not establish full-race fidelity.
+
+## PS3 strict O3 video test (2026-10-11)
+
+Revision 21 completes. Raster 92270 / 94124 / 63264 us at frames 180-239 /
+240-299 / 540-599, versus revision 19 93635 / 95671 / 63269 us: modest gain
+in early sections, essentially unchanged at the end. Tile draw/composition
+still total about 16 ms/frame. Revision 22 extends strict -O3 to video.cpp
+only; raster settings unchanged, other units remain -O2. Video is now always
+rebuilt under --reuse-runtime-objects to avoid stale compiler settings.
+No fast-math or FP contraction; 600-frame accuracy test before performance.
+
+## PS3 strict O3 performance test (2026-10-11)
+
+hardware-o3-parity-v20.log confirms all 600 reference hashes PASS on PS3.
+Revision 21 switches the unchanged strict -O3 rasterizer to --performance,
+removing reference hashes/traces but retaining scanline timers. Compare with
+revision 19 to measure the compiler change. Other compilation units remain
+-O2, with no fast-math or FP contraction. Speed benefit awaits console results;
+the startup reference pass does not establish full-race correctness.
+
+## PS3 strict O3 raster test (2026-10-11)
+
+Revision 19 completes: raster 93635 / 95671 / 63269 us at frames 180-239 /
+240-299 / 540-599, versus revision 17 98824 / 100808 / 68000 us (5-7% less).
+Retain polygon-local lighting caching. Revision 20 tests -O3 for raster.cpp
+only, preserving -fno-fast-math and -ffp-contract=off and -O2 for other units.
+No other platform flags change. The raster object is always rebuilt even with
+--reuse-runtime-objects. Package uses 600-frame reference validation first;
+neither hardware parity nor performance is established for this compiler change.
+
+## PS3 polygon lighting performance test (2026-10-11)
+
+hardware-lighting-parity-v18.log confirms all 600 reference hashes PASS on
+physical PS3. Revision 19 retains polygon-local lighting tables, cached mip
+addresses and covered-span rejection. Uses --performance without per-frame
+accuracy hashes/traces, retaining scanline timers for comparison to revision
+17. No further rendering changes. Lighting speed benefit awaits hardware
+measurement; the 600-frame pass does not establish full-race correctness.
+
+## PS3 polygon lighting parity test (2026-10-11)
+
+Revision 17 completes: raster 98824 / 100808 / 68000 us at frames 180-239 /
+240-299 / 540-599, versus revision 15 102111 / 104881 / 71452 us (3-5% less).
+Revision 18 retains mip caching and tests polygon-local 128-color lighting
+tables, built lazily when a span reaches 32 pixels. Short polygons retain the
+original path. Uses identical integer lighting equations and no persistent
+palette cache; adds 512 bytes to private Extra, not Raster object layout.
+600-frame reference validation is required before any performance claim.
+
+## PS3 mip address performance test (2026-10-11)
+
+hardware-mip-parity-v16.log confirms all 600 reference hashes PASS on PS3.
+Revision 17 keeps cached mip addresses and covered-span rejection, switching
+to --performance to remove accuracy hashes/traces. Compare against revision 15
+to isolate mip-address caching. No new rendering changes; speed benefit is
+pending hardware measurement, following Platform layer & build validation.
+
+## PS3 mip address parity test (2026-10-11)
+
+Revision 15 completes; covered-span rejection shows only small differences
+from revision 11 (102111 vs 103224 us at frames 180-239, 71452 vs 71363 us
+at 540-599), not an established material speedup. Retained for this next test.
+Revision 16 enables only existing per-polygon mip address/size precomputation
+on PS3, leaving scalar texel reads, lighting and FP interpolation unchanged.
+Extra is private to raster.cpp; Raster object layout is unchanged. Mip levels
+0..11 plus microtexture fit 13 entries. Run 600-frame parity before timing.
+
+## PS3 covered span performance test (2026-10-11)
+
+hardware-covered-span-v14.log confirms all 600 frame hashes PASS on PS3.
+Revision 15 retains that covered-span rejection and scalar texture reads,
+switching to --performance without per-frame hashes or diagnostic traces.
+Retains scanline timing for comparison with revision 11 baseline. No further
+render changes; hardware speed benefit remains unmeasured. This follows the
+design document Platform layer & build accuracy-before-performance sequence.
+
+## PS3 covered span parity test (2026-10-11)
+
+Revision 13 completes but packed texture reads regress: raster time at frames
+180-239 / 240-299 / 540-599 is 108724 / 110731 / 75760 us, versus revision 11
+103224 / 105647 / 71363 us. Reverted PS3 packed reads; Vita remains unchanged.
+Revision 14 instead enables the existing fully-covered span rejection on PS3.
+Four-byte memcpy checks skip spans only when every fill byte is 0xff; partial
+spans preserve all original FP interpolation additions. No class layout change.
+Following Platform layer & build parity-first rules, package uses 600-frame
+reference comparison, not performance mode. Accuracy and speed pending hardware.
+
+## PS3 packed texture performance test (2026-10-11)
+
+hardware-texture-parity-v12.log confirms all 600 reference frame hashes PASS
+on physical PS3 with packed texture reads. Revision 13 keeps that exact path
+and switches back to --performance, removing per-frame hashes and diagnostic
+traces. Retains revision 11 scanline timers for like-for-like measurements.
+Compare textured span and raster timings against revision 11; hardware speed
+improvement remains unmeasured. No lighting, quality or gameplay changes.
+
+## PS3 packed texture read parity test (2026-10-11)
+
+Revision 11 completed all 600 frames. Textured spans account for 82-96 percent
+of raster time; solid fills are below 0.2 ms/frame. Revision 12 enables only
+the existing read_texel_quad helper on PS3: aligned adjacent footprints share
+one packed-cell load, other footprints retain independent reads. No shade
+cache, mip-level precomputation, FP approximation or Raster layout changes.
+The design document's Platform layer & build parity-first boundary applies:
+this package uses --game-display (600 reference hashes), not --performance.
+PS3 plane normalization correction and cached display scaler stay enabled.
+Host ASan/UBSan test passes 2,000,000 footprints / 8,000,000 scalar comparisons;
+five Python tests pass. Big-endian console parity and speed remain untested.
+Next: require 600 hardware hashes to pass before measuring performance again.
+
+## PS3 scanline profiling test (2026-10-11)
+
+Revision 10 hardware log completes 600 frames. 3D rasterization costs 71-109 ms
+per frame, tile drawing about 10 ms, presentation about 11 ms; geometry 3-6 ms.
+Revision 11 adds PS3_PERF_PROBE-only scanline timers and counters, with no
+changes to rendered arithmetic. SPANS kinds: 0 solid opaque, 1 solid translucent
+(no drawing), 2 textured opaque, 3 textured translucent. Times are per-frame
+means; calls and candidate_pixels are totals for the preceding 60-frame window.
+Candidate pixels include occluded/checker pixels, not actual texture fetches.
+Timer overhead is included; compare with revision 10 before estimating setup
+cost by subtracting span times from raster time. No per-pixel timer overhead.
+Build/package validation and five unit tests pass; hardware results pending.
+
+## PS3 renderer timing breakdown (2026-10-11)
+
+hardware-scale-v9.log confirms revision 9 completes. In 3D, display now averages
+11.2-11.4 ms (previous ~48 ms); scale/copy ~10.7 ms, wait/input ~0.1 ms.
+Game/render remains 95-135 ms. Revision 10 enables existing VideoProfile clock
+and adds per-60-frame BREAKDOWN summaries: geometry/vblank-start, total video,
+tile cache, tile draw, CPU raster, composition, and remaining execution time.
+Geometry bucket includes vblank-start IRQ/communication overhead; remaining
+execution includes CPU/TGP dispatch and callbacks, not pure game logic.
+Video sub-buckets are nested in video_total, not additive to it. No gameplay
+arithmetic changes or frame skipping; cached scaler and plane correction stay.
+
+Revision 10 cross-build, ELF/SELF/PKG validation and five unit tests passed.
+Uploaded to /dev_hdd0/packages/daytona-ps3-probe.pkg and verified by download:
+SHA256 37deb91867feb56fdd8a90ee49c63ad64991c738316ee53559c5f4d5691f03ea.
+Requires package reinstallation and hardware run; new timing results pending.
+
+## PS3 cached presentation scaling (2026-10-11)
+
+Revision 8 hardware-performance.log completes 600 frames. In 3D, game/render
+averages 92-133 ms and presentation about 48 ms: roughly 5.5-7 FPS total.
+Revision 9 changes only display scaling: cache horizontal sample coordinates,
+build a row in main RAM, reuse it for duplicate source rows, memcpy to scanout.
+No VRAM readback, same 4:3 nearest-neighbour sampling and XRGB masking.
+ASan/UBSan test_scale.cpp passes 25,762,088 exact pixel comparisons across modes,
+source widths, repeated frames and dimension changes, with output guard words.
+Adds per-60-frame wait/input, scale/copy and submit timing breakdown. Real
+hardware speedup unmeasured until next log. Game rendering itself unchanged.
+
+Revision 9 cross-build/SELF/PKG and five existing tests passed. Uploaded PKG
+SHA256 c3e6b6e57b5b20d3327d95450deeb6fc68d092623cc384a8e438490f88eb2f9a.
+Compare next hardware PERFORMANCE/PRESENT timings with revision 8 baseline.
+
+## PS3 performance baseline (2026-10-11)
+
+hardware-plane-fix.log verifies all 600 frames match the unchanged host oracle
+after the PS3 plane_hypot correction. User observed progress but slow execution.
+Revision 8 adds --performance: identical 600-frame startup without per-frame
+RAM/register/pixel hashing or geometry/raster traces. Keeps ROM validation and
+the corrected math. Logs per-60-frame game/render and presentation mean/max
+microseconds plus elapsed milliseconds, using PPU timebase and SDK frequency.
+Presentation includes flip waiting. Completion is explicitly NOT a parity pass.
+No CPU scaling/render optimization yet: first obtain a measured baseline.
+No audio/gameplay input; bounded hold and automatic return remain.
+
+Revision 8 cross-build and package checks pass; five existing tests pass.
+Executable inspection confirms raster/clip diagnostic symbols and per-frame
+hash messages absent. Uploaded package SHA256:
+279ed5696b119913ae02ac85d7ff9f1139146702607841cb63ae847a67fc07f0.
+Hardware timing results pending; do not claim FPS improvement yet.
+
+## PS3 plane normalization correction (2026-10-11)
+
+Revision 6 hardware-clip.log first differs at record 0: plane normal pz is
+3f7fff78 host vs 3f7fff79 PS3, all incoming vertices equal. Linked .hypotf
+disassembly shows scaled float divides, fmadds, fsqrts and float multiply.
+Thus the prebuilt library contains fused arithmetic even though geo/raster do
+not. Source inspected earlier generic newlib ef_hypot.c is NOT the linked
+implementation; executable disassembly is the evidence for this target.
+
+Revision 7 changes only the PS3 float-hypot compatibility shim to plane_hypot,
+double square/sum/sqrt then float rounding (infinite arguments handled).
+Host sweep passes all 524284 normalized components for integer planes from
+-65535 through +65535 with both signs. No whole-game correctness claim until
+hardware run. Rebuild geo/raster/frontend; preserve fresh host reference and
+unchanged generated execution objects. Diagnostic traces remain enabled.
+
+Revision 7 target build/SELF/PKG passed, five existing unit tests pass. Object
+inspection confirms double fsqrt and no hypotf call in corrected geo.cpp.
+Uploaded PKG SHA256 6cb8bfc661da2ea9c7bddccbb63a90a43b114e35feec86ef947786df22fe8df7.
+Next fetch console log; require frame 181 and remaining startup hashes to pass.
+
+## PS3 clipper boundary trace (2026-10-11)
+
+Revision 5 hardware-geometry.log shows differences already in stage-0 geometry
+vertices, before projection. Raster interpolation is downstream, not established
+as the origin. Compiled geo.cpp also contains no fused multiply-add instructions.
+Revision 6 traces frame-181 clipping input vertices and plane normals, plus
+crossing-edge dot products, scale and resulting vertices. Math is unchanged;
+do not substitute a guessed hypot/rounding fix before comparing this trace.
+compare_clip.py reports the first differing record/word. --reuse-runtime-objects
+now always rebuilds geo.cpp and raster.cpp for diagnostic changes.
+
+Revision 6 build/SELF/PKG passed. Host 600-frame run unchanged, 7188 clipping
+records captured; self-comparison and five existing tests pass. Uploaded PKG
+SHA256 04764aa19cf234a5ce65df66dd8a771c5422f3c5030ebe1b43f4cb0b80eb78f2.
+Await hardware log; no arithmetic fix claimed. Failed-test automatic exit stays.
+
+## PS3 geometry/interpolation boundary (2026-10-11)
+
+Revision 4 hardware-raster.log confirms selected UV fixed-point coordinates
+differ by one, changing filtered texel and final color. Differences already
+exist in scanline start/step floats; lighting inputs match. This does not yet
+identify whether source vertices, projection, or edge interpolation first differ.
+No fused multiply-add instructions found in compiled raster object; do not
+assume FMA is the cause simply because the target is PowerPC.
+
+Revision 5 records pre-projection vertices (stage 0), projected/perspective
+vertices (stage 1) and polygon-edge intermediates (stage 2), only emitting
+records for the three selected pixels in frame 181. Rendering math unchanged.
+Host and PS3 traces use the same field layout; vertex records contain count
+then x,y,p0,p1,p2 per vertex. Edge fields are documented inline in raster.cpp.
+
+Revision 5 build/link/package passed. Host completes 600 frames with unchanged
+frame-599 hash and captures nine geometry records (three stages per pixel).
+Parser self-comparison and five unit tests pass. Uploaded package SHA256:
+b369e5b03aef191ef5a1c9eeff05a1ee44d2e9db67448d97c862261fe0b3fc84.
+Await hardware trace; no precision/rendering fix claimed.
+
+## PS3 targeted raster evidence (2026-10-11)
+
+Revision 3 hardware-components.log and hardware-frame181-state.bin confirm
+CPU/main RAM/work RAM/TGP count all match. Exactly 22 of 190464 output pixels
+differ at frame 181, by small color changes. Exit reached "returning to XMB".
+No evidence yet whether interpolants, texture samples or lighting cause this.
+
+Revision 4 preserves arithmetic and captures float bit patterns, fixed-point
+UV, mip selection, filtered texel and shading inputs for pixels (9,41),
+(204,239), (409,316) during frame 181. Same instrumentation on host and PS3;
+M2_RASTER_DIAGNOSTICS is off for other builds. Rebuilds raster.cpp even with
+--reuse-runtime-objects. compare_raster.py compares private log records.
+Do not waive image parity or claim a precision fix without this evidence.
+
+Revision 4 builds and packages successfully. Host still passes 600 frames;
+three RasterPixel records captured, parser self-comparison passes, five unit
+tests pass. Uploaded PKG SHA256
+86ec2a2e91ff0829e096c4e10f436a7d4b5b14b1f851c50188d19551efa3c78a.
+Await physical PS3 log, then compare_raster.py against current host-game.log.
+
+## PS3 frame-181 divergence (2026-10-11)
+
+User photo confirms game HUD pixels displayed, but Start+Select did not exit
+and user restarted. hardware-display-game.log shows frames 0-180 matching;
+181 diverges (host 42849d0a7d05f77d, PS3 007b9e1ca2dd540f), then normal FAIL
+and final-frame hold. This is not evidence of a CPU crash. Instruction/TGP
+counts and IP match at 181; differing registers, RAM or pixels not yet isolated.
+
+Revision 3 adds independent CPU/main RAM/work RAM/video/TGP-count hashes at
+frames 178-181 and a private little-endian frame181-state.bin beside roms.
+compare_state.py reports differing word indices without printing memory data.
+Failure now returns to XMB; success hold is bounded to about 15 seconds.
+This avoids relying on the unresolved controller exit, not a claim it is fixed.
+No game arithmetic/rendering changes until component evidence is available.
+
+Revision 3 cross-build/SELF/PKG passed, host still completes 600 frames, five
+header/state-parser tests pass. Host frame181-state.bin parses successfully.
+Uploaded package SHA256 77b4ce2025688d028dd8d1cf3e1f318426e8004c1ca1ed39ed1e86ce4aae08be.
+Next retrieve both ps3-boot.log and frame181-state.bin from title USRDIR;
+save the console dump under a different name to preserve the host reference.
+
+## PS3 game presentation test (2026-10-11)
+
+Hardware-game.log confirms all 120 startup frame hashes matched the host,
+Runner destroyed, final PASS; user confirms clean XMB return. Next test adds
+600-frame oracle and RSX presentation, retaining the checked CPU framebuffer
+and 4:3 aspect. Final image stays on screen until Start+Select or XMB exit.
+No audio or gameplay controls yet; actual visible output remains untested.
+Presentation does not change simulation inputs, timing boundaries or renderer.
+Original runtime/generated objects may be reused for this frontend-only change;
+never use --reuse-runtime-objects after runtime/header/toolchain changes.
+
+600-frame host run passed; frame 599 hash 2c5c1250f587b1d5. Full target
+link, SELF/PKG validation and three header tests passed. New package SHA256
+f3d79c5e23c7022275744863b59dff8108321155a2ee0531ed16615bb18f2f45,
+uploaded to .64 /dev_hdd0/packages/daytona-ps3-probe.pkg. Existing ROM data
+unchanged. Reinstall before testing. Hardware display/parity results pending.
+
+## PS3 real-runtime integration (2026-10-11)
+
+Retrieved hardware-cxx.log: C++20 vector/span/bit_cast/exception/main-thread
+TLS PASS, RSX 1920x1080, 120 flips, Cross press/release, clean exit. PS3 FTP is
+now 192.168.1.64, not .83. Worker-thread TLS is not validated.
+
+Added --game-probe to PS3 builder: isolated ps3-host-tools generation, fresh
+120-frame host oracle, shared bounded Runner with native PS3 paths/callbacks.
+Xbox TLS/exception wrappers are excluded. It returns to XMB after comparison;
+no presentation or audio in this test. Six verified ROM images are separate
+from PKG, in installed title USRDIR/roms (about 75 MiB).
+
+First compile exposed missing C99 declarations under strict C++20; adding
+cstdio alone did not solve it. GNU++20 exposes C declarations, but this SDK's
+libstdc++ configuration omits several std namespace exports. Target-only
+cxx_compat.h imports existing functions and preserves float hypot via hypotf.
+Runtime syntax check passes with this shim; full build/hardware results below.
+
+Full GCC 13.2 compile/link and SELF/PKG generation passed. Fresh host oracle
+completed all 120 frames and matches existing Xbox host-reference hashes;
+three package-header unit tests and git diff --check passed. Target ELF has
+5,104,483 bytes text, 13,372 data, 265,440 BSS (not the dynamic memory budget).
+Generated chunks compile slowly; builder now uses four workers. The final
+target-only rebuild reused the freshly generated oracle, with unchanged runtime.
+PKG SHA256: 37c3c9518e3c42c6d89cb4746e6af341a8fcd9a5852cb284b9cf86d5852a8395.
+Uploaded to /dev_hdd0/packages/daytona-ps3-probe.pkg; six USRDIR/roms assets
+uploaded and verified by downloaded SHA256. User must reinstall and launch;
+blank screen then XMB is expected. Fetch ps3-boot.log and require 120 hashes
+plus final PASS before presentation integration. Real PS3 runtime is untested.
+
+## PS3 isolated C++20 toolchain (2026-10-11)
+
+User photo confirms colour bars; retrieved display log reports RSX initialized,
+1920x1080, 120 flips submitted and leaving probe. No Cross events were logged.
+Evidence saved to build/ps3-current/hardware-display.log.
+
+Copied working SDK to build/ps3-sdk and built upstream ps3toolchain GCC 13.2
+plus its target runtime there. System /usr/local/ps3dev remains GCC 7.2. Sources
+and logs are in build/ps3-toolchain-source; preserve both build dependencies.
+Pinned script revision e13aa539c07abe86cdbcd095dc1340492dbca213. Host Clang
+MPFR float128 detection conflicted with glibc: --disable-float128 resolved it.
+Old newlib makedoc then needed -Wno-error=incompatible-pointer-types and
+-Wno-error=int-conversion for CFLAGS_FOR_BUILD only. Target checks unchanged.
+upgrade_toolchain.sh records the reproducible staging/configuration approach.
+
+New compiler passes --check-cxx (C++20 span/bit_cast/vector, exceptions and TLS
+linking). --runtime-probe packages those checks before the existing C display.
+Host ASan/UBSan check passes with leak detection disabled for sandbox ptrace
+restrictions. Three ELF-header tests and package/header checks pass. Hardware
+C++ runtime validation remains pending; no game, worker TLS or audio claims.
+Uploaded package only to /dev_hdd0/packages/daytona-ps3-probe.pkg; readback
+SHA-256 matches 918e001a55603bb42de3acf4113d08c6df86ce17c13274242d65b27c82c33eb6.
+Reinstallation is required; nothing remotely installed/launched.
+
+## PS3 initial display/input port (2026-10-11)
+
+Branch ps3 starts at Xbox bring-up commit 8ecaa13. Added platform/ps3 with a
+ROM-free RSX CPU-written double-buffer display test, pad input, XMB callback,
+bounded flip polling and persistent log. Build script produces SELF and PKG
+in build/ps3-current (DAYTPS301); no SDK modifications, deployment or commit.
+Uses documented PSL1GHT RSX APIs, no copied sample implementation or shaders.
+Design basis: platform-layer bring-up before game integration and parity before
+optimization. Existing PC/mobile/Vita/Xbox build paths are unchanged.
+
+Installed /usr/local/ps3dev compiler is GCC 7.2. Strict C11 failed on SDK asm
+extensions; GNU C11 builds. The explicit C++20 span/bit_cast/exception/TLS
+probe fails because -std=c++20 is unsupported. Do not claim the game compiles
+or solve this by dropping its language requirements. Next toolchain work needs
+an isolated newer compiler/library with verified PS3 ABI, not an SDK overwrite.
+
+Display probe ELF64 big-endian PPC64, SELF generation and package listing pass.
+PKG SHA-256: 4131075f074f14dd7add4f7e7c769dde237ed64a2c102dbbe67fe603409ed899.
+Contains PARAM.SFO and EBOOT.BIN only, no game data. Hardware is untested.
+Expected screen: colour bars/moving strip; Cross turns lower field green;
+Start+Select or PS/XMB exits. Log: installed USRDIR/ps3-boot.log, USB000 fallback.
+Audio/game runtime remain unimplemented; no gameplay/performance claims.
+
 ## Xbox presentation investigation boundary (2026-10-11)
 
 Physical-buffer hardware log passes: virtual ffb2c000, physical 1fb2d000,

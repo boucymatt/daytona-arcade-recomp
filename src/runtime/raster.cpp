@@ -10,6 +10,10 @@
 
 #include "runtime/raster.h"
 #include "runtime/guest_endian.h"
+#ifdef PS3_GAME_PROBE
+#include "../../platform/ps3/texel_byte.h"
+#include "../../platform/ps3/float_int.h"
+#endif
 #ifdef M2_VITA_RENDER_OPT
 #include "runtime/raster_texel.h"
 #endif
@@ -21,6 +25,26 @@
 #include <cstring>
 #include <limits>
 #include <numeric>
+#ifdef PS3_PERF_PROBE
+// Probe-only counters; no per-pixel timing or changes to raster arithmetic.
+uint64_t ps3_span_ticks[4] = {}, ps3_span_calls[4] = {}, ps3_span_pixels[4] = {};
+struct Ps3SpanTimer {
+    unsigned kind;
+    uint64_t start;
+    static uint64_t now() {
+        uint64_t t; __asm__ volatile("mftb %0" : "=r"(t) :: "memory"); return t;
+    }
+    Ps3SpanTimer(unsigned k, int32_t x0, int32_t x1) : kind(k), start(now()) {
+        ++ps3_span_calls[kind];
+        if (x1 > x0) ps3_span_pixels[kind] += uint64_t(x1 - x0);
+    }
+    ~Ps3SpanTimer() { ps3_span_ticks[kind] += now() - start; }
+};
+#endif
+#ifdef M2_RASTER_DIAGNOSTICS
+extern void raster_pixel_diagnostic(int, int, const uint32_t *, unsigned);
+extern void raster_geometry_diagnostic(unsigned, const uint32_t *, unsigned);
+#endif
 
 namespace rt {
 
@@ -36,8 +60,12 @@ inline u32 rgb(u32 r, u32 g, u32 b) { return 0xff000000u | (r << 16) | (g << 8) 
 
 // x86 cvttss2si: NaN and out of range give INT32_MIN.
 inline s32 to_s32(float f) {
+#ifdef PS3_GAME_PROBE
+    return ps3::truncate_coordinate(f);
+#else
     if (!(f >= -2147483648.0f && f < 2147483648.0f)) return std::numeric_limits<s32>::min();
     return s32(f);
+#endif
 }
 
 // poly.h round_coordinate (float), with NaN pinned as above.
@@ -76,11 +104,15 @@ inline u16 get_texel(u32 base_x, u32 base_y, int x, int y, const u32 *sheet) {
         y2 ^= 1024;
     }
     u32 offset = u32(((y2 / 2) * 512) + (x2 / 2));
+#ifdef PS3_GAME_PROBE
+    return ps3::texel_byte(offset, x, y, sheet);
+#else
     u32 texel = guest_load<uint32_t>(sheet + ((offset >> 1) & 0x7ffff));
     if (offset & 1) texel >>= 16;
     if ((y & 1) == 0) texel >>= 8;
     if ((x & 1) == 0) texel >>= 4;
     return texel & 0x0f;
+#endif
 }
 
 #endif
@@ -98,13 +130,20 @@ struct Raster::Extra {
     u32 utexx = 0, utexy = 0;
     s32 texlod = 0;
     u8 luma = 0;
-#ifdef M2_VITA_RENDER_OPT
+#if defined(M2_VITA_RENDER_OPT) || defined(PS3_GAME_PROBE)
     struct Level {
         u32 width = 0, height = 0, x = 0, y = 0;
         const u32 *sheet = nullptr;
     };
     Level levels[13]; // 0 = microtexture, 1..12 = mip levels 0..11
     s32 max_level = 0;
+#endif
+#ifdef M2_VITA_RENDER_OPT
+    mutable const u32 *shades = nullptr;
+#elif defined(PS3_GAME_PROBE)
+    // Polygon-local lifetime: palette/luma changes cannot leave stale entries.
+    mutable u32 shade_colors[128];
+    mutable u32 shade_valid[4] = {};
     mutable const u32 *shades = nullptr;
 #endif
 };
@@ -250,6 +289,20 @@ int Raster::hud_polygon_offset(const GeoPoly& poly) const {
 
 void Raster::render_one(GeoPoly poly, int crtc_x, int crtc_y, int render_x, int render_y, int clip_minx, int clip_maxx,
                         int clip_miny, int clip_maxy) {
+#ifdef M2_RASTER_DIAGNOSTICS
+    auto record_vertices = [&](unsigned stage) {
+        uint32_t values[41] = {uint32_t(poly.num_vertices)};
+        if (poly.num_vertices < 0 || poly.num_vertices > 8) return;
+        for (int i = 0; i < poly.num_vertices; ++i) {
+            values[1 + i * 5] = f2u(poly.v[i].x);
+            values[2 + i * 5] = f2u(poly.v[i].y);
+            for (int p = 0; p < 3; ++p) values[3 + i * 5 + p] = f2u(poly.v[i].p[p]);
+        }
+        raster_geometry_diagnostic(stage, values, 1 + poly.num_vertices * 5);
+    };
+    record_vertices(0);
+    raster_geometry_diagnostic(2, nullptr, 0);
+#endif
     // Widescreen: a viewport spanning the screen extends into the side margins.
     const int wide = margin_ && poly.viewport[0] <= 0 && poly.viewport[2] >= 495 ? margin_ : 0;
     // model2_3d_project
@@ -305,7 +358,7 @@ void Raster::render_one(GeoPoly poly, int crtc_x, int crtc_y, int render_x, int 
         extra.utexminlod = (poly.texheader[0] >> 10) & 3;
         extra.utexx = ((poly.texheader[2] >> 13) & 1) * 128;
         extra.utexy = ((poly.texheader[2] >> 14) & 3) * 128;
-#ifdef M2_VITA_RENDER_OPT
+#if defined(M2_VITA_RENDER_OPT) || defined(PS3_GAME_PROBE)
         extra.max_level = 30 - std::countl_zero(std::min(extra.texwidth, extra.texheight));
         extra.levels[0] = {128, 128, extra.utexx, extra.utexy, extra.texsheet[1]};
         for (int level = 0; level <= extra.max_level; ++level)
@@ -321,6 +374,9 @@ void Raster::render_one(GeoPoly poly, int crtc_x, int crtc_y, int render_x, int 
         }
     }
 
+#ifdef M2_RASTER_DIAGNOSTICS
+    record_vertices(1);
+#endif
     switch (poly.num_vertices) {
     case 3: render_triangle(clip, renderer, extra, poly.v[0], poly.v[1], poly.v[2]); break;
     case 4: render_polygon<4>(clip, renderer, extra, poly.v); break;
@@ -355,7 +411,10 @@ const uint32_t *Raster::shade_table(const Extra &o) {
 #endif
 
 void Raster::scanline(int renderer, int32_t y, int32_t x0, int32_t x1, const float *start, const float *dpdx, const Extra &o) {
-#ifdef M2_VITA_RENDER_OPT
+#ifdef PS3_PERF_PROBE
+    Ps3SpanTimer timer(renderer < 3 ? unsigned(renderer) : 3u, x0, x1);
+#endif
+#if defined(M2_VITA_RENDER_OPT) || defined(PS3_GAME_PROBE)
     if (x0 >= x1) return;
     // A completely filled span cannot contribute any pixel. Test four bytes
     // at a time with memcpy (valid for unaligned pointers); partial spans keep
@@ -500,6 +559,17 @@ void Raster::render_polygon(const int *clip, int renderer, const Extra &o, const
         const float ldy = fully - ledge->v1->y;
         const float rdy = fully - redge->v1->y;
         const float oox = 1.0f / (stopx - startx);
+#ifdef M2_RASTER_DIAGNOSTICS
+        if (curscan == 41 || curscan == 239 || curscan == 316) {
+            const uint32_t values[] = {f2u(fully), f2u(startx), f2u(stopx), f2u(ldy), f2u(rdy), f2u(oox),
+                f2u(ledge->dxdy), f2u(redge->dxdy),
+                f2u(ledge->dpdy[0]), f2u(ledge->dpdy[1]), f2u(ledge->dpdy[2]),
+                f2u(redge->dpdy[0]), f2u(redge->dpdy[1]), f2u(redge->dpdy[2]),
+                f2u(ledge->v1->p[0]), f2u(ledge->v1->p[1]), f2u(ledge->v1->p[2]),
+                f2u(redge->v1->p[0]), f2u(redge->v1->p[1]), f2u(redge->v1->p[2])};
+            raster_geometry_diagnostic(2, values, sizeof(values) / sizeof(values[0]));
+        }
+#endif
         for (int p = 0; p < 3; p++) {
             const float lparam = ledge->v1->p[p] + ldy * ledge->dpdy[p];
             const float rparam = redge->v1->p[p] + rdy * redge->dpdy[p];
@@ -532,7 +602,7 @@ void Raster::draw_scanline_solid(int32_t y, int32_t x0, int32_t x1, const float 
 
 template <bool Translucent>
 uint32_t Raster::fetch_bilinear_texel(const Extra &o, int32_t miplevel, int32_t u, int32_t v) const {
-#ifdef M2_VITA_RENDER_OPT
+#if defined(M2_VITA_RENDER_OPT) || defined(PS3_GAME_PROBE)
     const auto &level = o.levels[miplevel + 1];
     const u32 tex_width = level.width, tex_height = level.height, tex_x = level.x, tex_y = level.y;
     const u32 *sheet = level.sheet;
@@ -618,6 +688,22 @@ void Raster::draw_scanline_tex(int32_t y, int32_t x0, int32_t x1, const float *s
     // table and subsequent rows reuse it. This chooses work, not image quality.
     if (!o.shades && x1 - x0 >= 32) o.shades = shade_table(o);
     if (o.shades) { draw_tex_span<Translucent, true>(y, x0, x1, start, dpdx, o); return; }
+#elif defined(PS3_GAME_PROBE)
+    if (!o.shades && x1 - x0 >= 32) {
+        const u32 color = le16(mem_->palram, o.colorbase + 0x1000) & 0x7fff;
+        const u32 cr = ((color >> 0) & 0x1f) << 8;
+        const u32 cg = 0x4000 / 2 + (((color >> 5) & 0x1f) << 8);
+        const u32 cb = 0x8000 / 2 + (((color >> 10) & 0x1f) << 8);
+        for (u32 t = 0; t < 128; ++t) {
+            u8 luma = u8(u32(mem_->lumaram[(o.lumabase + t) * 4]) * o.luma / 256);
+            luma = std::min(luma, u8(0x3f));
+            o.shade_colors[t] = rgb(gamma_[le16(mem_->colorxlat, cr + luma) & 0xff],
+                gamma_[le16(mem_->colorxlat, cg + luma) & 0xff],
+                gamma_[le16(mem_->colorxlat, cb + luma) & 0xff]);
+        }
+        o.shades = o.shade_colors;
+    }
+    if (o.shades) { draw_tex_span<Translucent, true>(y, x0, x1, start, dpdx, o); return; }
 #endif
     draw_tex_span<Translucent, false>(y, x0, x1, start, dpdx, o);
 }
@@ -628,7 +714,7 @@ void Raster::draw_tex_span(int32_t y, int32_t x0, int32_t x1, const float *start
     u8 *const fill = &fill_[size_t(y) * size_t(stride_)];
     float ooz = start[0], uoz = start[1], voz = start[2];
     float dooz = dpdx[0], duoz = dpdx[1], dvoz = dpdx[2];
-#ifdef M2_VITA_RENDER_OPT
+#if defined(M2_VITA_RENDER_OPT) || defined(PS3_GAME_PROBE)
     const s32 max_level = o.max_level;
 #else
     const s32 max_level = 30 - std::countl_zero(std::min(o.texwidth, o.texheight));
@@ -676,19 +762,46 @@ void Raster::draw_tex_span(int32_t y, int32_t x0, int32_t x1, const float *start
             if (t < 0x00400000) continue;
             t &= 0xff;
         }
-#ifdef M2_VITA_RENDER_OPT
+#if defined(M2_VITA_RENDER_OPT) || defined(PS3_GAME_PROBE)
         if constexpr (Cached) p[x] = o.shades[t >> 1];
         else
 #endif
         {
+#if defined(PS3_GAME_PROBE) && !defined(M2_VITA_RENDER_OPT)
+            const u32 shade_index = t >> 1;
+            const u32 shade_bit = 1u << (shade_index & 31);
+            if (o.shade_valid[shade_index >> 5] & shade_bit) {
+                p[x] = o.shade_colors[shade_index];
+            } else {
+#endif
             u8 luma = u8(u32(mem_->lumaram[(o.lumabase + (t >> 1)) * 4]) * o.luma / 256);
             luma = std::min(luma, u8(0x3f));
             const u32 tr = gamma_[le16(mem_->colorxlat, cr + luma) & 0xff];
             const u32 tg = gamma_[le16(mem_->colorxlat, cg + luma) & 0xff];
             const u32 tb = gamma_[le16(mem_->colorxlat, cb + luma) & 0xff];
             p[x] = rgb(tr, tg, tb);
+#if defined(PS3_GAME_PROBE) && !defined(M2_VITA_RENDER_OPT)
+                o.shade_colors[shade_index] = p[x];
+                o.shade_valid[shade_index >> 5] |= shade_bit;
+            }
+#endif
         }
         fill[x] = 0xff;
+#ifdef M2_RASTER_DIAGNOSTICS
+        // Selected differing pixels from the PS3 frame-181 state comparison.
+        if ((x == 9 && y == 41) || (x == 204 && y == 239) || (x == 409 && y == 316)) {
+            const uint32_t values[] = {
+                f2u(start[0]), f2u(start[1]), f2u(start[2]),
+                f2u(dpdx[0]), f2u(dpdx[1]), f2u(dpdx[2]),
+                f2u(ooz), f2u(uoz), f2u(voz), f2u(z),
+                uint32_t(u), uint32_t(v), uint32_t(mml), uint32_t(level), t,
+                o.lumabase, o.luma, o.colorbase, cr, cg, cb, p[x],
+                uint32_t(x0), uint32_t(x1), uint32_t(Translucent),
+                o.texx, o.texy, o.texwidth, o.texheight, uint32_t(o.texlod)
+            };
+            raster_pixel_diagnostic(x, y, values, sizeof(values) / sizeof(values[0]));
+        }
+#endif
     }
 }
 

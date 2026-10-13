@@ -748,7 +748,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
         return;
     }
 #endif
-#ifndef M2_DC_MEMORY
+#if !defined(M2_DC_MEMORY) && !defined(PS3_RSX_GAME)
     // (Not the Dreamcast: its PVR renderer uploads the two layers this
     // function composes below, the screen and sys24.)
     if (external_3d_ && !desktop_ && system24_gpu_compatible()) {
@@ -912,7 +912,7 @@ void Video::screen_update(const std::vector<GeoPoly> &polys, int windows, const 
     xbox_video_checkpoint("Video before screen fill");
     std::fill(screen_.begin(), screen_.end(), pens_[0]);
     xbox_video_checkpoint("Video after screen fill");
-#ifdef M2_DC_SPEED
+#if defined(M2_DC_SPEED) || defined(PS3_RSX_GAME)
     // As the Vita's path: the back layers drawn straight over pen 0, not
     // into a cleared sys24_ copied over it (no margins: the same stride).
     if (!margin_) {

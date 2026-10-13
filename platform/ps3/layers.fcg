@@ -1,0 +1,10 @@
+// CPU span selection supplies scroll, window, layer and category decisions.
+float4 main(float4 mapping : TEXCOORD1, uniform sampler2D layers,
+            uniform sampler2D tiledata) : COLOR {
+    float4 pixel=tex2D(layers,mapping.xy);
+    float4 backdrop=float4(tex2D(tiledata,float2(0.5/256.0,0.5/64.0)).rgb,1.0);
+    // Keep one return path while isolating the revision-52 flip timeout.
+    pixel=lerp(pixel,backdrop,step(3.5,mapping.w));
+    if(pixel.a<0.5) discard;
+    return pixel;
+}

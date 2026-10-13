@@ -13,6 +13,7 @@
 #include "runtime/cpu.h"
 
 #include <cstdarg>
+#include <cstdio>
 #include <cstring>
 
 namespace rt {
