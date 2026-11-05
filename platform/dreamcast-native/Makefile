@@ -87,6 +87,18 @@ endif
 # The disc image (recipes/README.md, "Disc image"): enDjinn's image target, mkdcdisc with ENJ_ROMDIR at the root.
 .PHONY: cdi
 cdi: $(ENJ_BINDIR)/$(ENJ_BASENAME).cdi $(if $(filter 1,$(NATIVE_LAYOUT)),layout-check)
+
+$(ENJ_BINDIR)/$(ENJ_BASENAME).cdi: $(ENJ_BINDIR)/$(ENJ_BASENAME).elf $(ENJ_IPLOGO) | $(ROMBASEPATH)
+	mkdcdisc \
+		--name $(ENJ_BASENAME) \
+		--elf $< \
+		-D "$(ENJ_ROMDIR)/" \
+		--release $(shell date +%Y%m%d) \
+		--serial "ENJ01" \
+		--output $@ \
+		-v 3 \
+		--image $(ENJ_IPLOGO) \
+		--no-padding
 ifneq ($(filter cdi %.cdi,$(MAKECMDGOALS)),)
 ifndef NATIVE_DISC
 $(error make cdi needs NATIVE_DISC=1: a dcload build reads its assets from /pc)
