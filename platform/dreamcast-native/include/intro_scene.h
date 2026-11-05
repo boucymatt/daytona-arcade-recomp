@@ -205,7 +205,7 @@ static inline int nm_intro_scene_collision_prepare(nm_intro_scene_t *s,const nm_
         s->collision_motion[i]=b->motion;s->collision_adjusted[i]=b->adjusted;
         s->collision_candidates[i]=b->candidates;s->collision_side[i]=b->contact_side;
     }
-    for(unsigned i=0;i<14;++i) s->collision_order[i]=order[i]+1==s->count ? 0 : (uint16_t)(order[i]+1);
+    for(unsigned i=0;i<14;++i) s->collision_order[i]=(uint32_t)(order[i]+1)==s->count ? 0 : (uint16_t)(order[i]+1);
     return 1;
 }
 

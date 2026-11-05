@@ -250,7 +250,7 @@ static void replay(const char *path) {
     unsigned fake_before = fake.patches;
     for (;;) {
         long at = -1; unsigned long cmd = 0;
-        const int got = fgets(line, sizeof(line), f) && sscanf(line, "frame=%ld tick=%*ld cmd=%lx", &at, &cmd) == 2;
+        const int got = fgets(line, sizeof(line), f) && sscanf(line, "frame=%ld tick=%*d cmd=%lx", &at, &cmd) == 2;
         if (!got || at != frame_now) {
             if (frame_now >= 0) {
                 /* Every frame from the previous command's to this one: the updater runs each frame. */

@@ -174,6 +174,8 @@ int main(int argc,char **argv) {
         free(face_row); free(expected); free(actual); free(previous);
     }
     free(row_of); free(table);
+    nm_pack_unload(&pack);
+    free(dna);
     if(failed) return 1;
     printf("PASS: clock light, %u placed groups, %u placements, %u faces (%u with a specular material, %u two-sided), "
         "keys of another view equal %u / differ %u\n",groups,placements,faces_checked,specular_faces,two_sided,keys_equal,keys_differ);

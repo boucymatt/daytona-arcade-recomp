@@ -38,7 +38,10 @@ static void enj_font_scale_set(int scale) { assert(scale==1); }
 static void enj_qfont_color_set(int r,int g,int b) { (void)r;(void)g;(void)b; }
 static int enj_qfont_write(const char *text,int x,int y,int list) {
     (void)x;(void)y;assert(list==PVR_LIST_PT_POLY);
-    if(texts<16) snprintf(shown[texts++],64,"%s",text);return 1;
+    if(texts<16) {
+        snprintf(shown[texts++],64,"%s",text);
+    }
+    return 1;
 }
 static int showing(const char *part) {
     for(unsigned i=0;i<texts;++i) if(strstr(shown[i],part)) return 1;

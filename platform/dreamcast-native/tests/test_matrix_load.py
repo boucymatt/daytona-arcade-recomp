@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
-library = root.parents[2] / "sh4zam"
+library = root.parents[1] / "extern" / "sh4zam"
 functions = []
 for path, declaration in (
     ("include/render/models/model_math.h", "static inline void load_matrix("),

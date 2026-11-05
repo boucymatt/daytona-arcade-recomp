@@ -33,7 +33,7 @@ int nm_save_valid(const nm_save_t *save) {
 static uint16_t crc16_more(uint16_t crc,const uint8_t *data,size_t size) {
     while(size--) {
         crc^=(uint16_t)(*data++<<8);
-        for(unsigned bit=0;bit<8;++bit) crc=(uint16_t)(crc&0x8000u ? (crc<<1)^0x1021u : crc<<1);
+        for(unsigned bit=0;bit<8;++bit) crc=(uint16_t)((crc&0x8000u) ? ((uint32_t)crc<<1)^0x1021u : ((uint32_t)crc<<1));
     }
     return crc;
 }

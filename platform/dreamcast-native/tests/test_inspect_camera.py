@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
-sh4zam = Path(os.environ.get("SH4ZAM_ROOT", root.parents[2] / "sh4zam"))
+sh4zam = Path(os.environ.get("SH4ZAM_ROOT", root.parents[1] / "extern" / "sh4zam"))
 source = r'''
 #include "render/scene/inspect_camera.h"
 #include <assert.h>
