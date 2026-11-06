@@ -59,8 +59,8 @@ is part of the game or linked into it.
 
 | Tool | Version | Licence | Used for |
 | --- | --- | --- | --- |
-| [DirectXShaderCompiler](https://github.com/microsoft/DirectXShaderCompiler) | v1.9.2609 (`linux_dxc_2026_09_28`) | University of Illinois/NCSA | HLSL to SPIR-V and DXIL |
-| [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross) | Ubuntu 24.04's package | Apache-2.0 | SPIR-V to MSL |
+| [DirectXShaderCompiler](https://github.com/microsoft/DirectXShaderCompiler) | v1.9.2609 (`linux_dxc_2026_09_28` or `dxc_2026_09_29` on Windows) | University of Illinois/NCSA | HLSL to SPIR-V and DXIL |
+| [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross) | `vulkan-sdk-1.3.290.0` (current generated shaders); Ubuntu 24.04's package in Docker | Apache-2.0 | SPIR-V to MSL |
 
 Vita GPU display buffering builds MIT libvita2d at
 `a8f15ab09d5233f0a4e4ad0e8f6ade0da888cbed` from

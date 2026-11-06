@@ -12,6 +12,7 @@ distribution's spirv-cross). Both are tools only, not part of the game.
 """
 
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -30,21 +31,23 @@ ENTRIES = [("vs_poly", "vertex", "vs_6_0"), ("ps_poly", "fragment", "ps_6_0"),
 
 
 def commands(dxc, spirv_cross):
-    cmds = [f"mkdir -p {WORK}"]
+    cmds = []
     for entry, _, profile in ENTRIES:
         base = f"{WORK}/{entry}"
         cmds += [
-            f"{dxc} -spirv -fspv-target-env=vulkan1.0 -fspv-entrypoint-name=main -T {profile} -E {entry} -Fo {base}.spv {SRC}",
-            f"{dxc} -T {profile} -E {entry} -Fo {base}.dxil {SRC}",
-            f"{spirv_cross} {base}.spv --msl --msl-version 20100 --output {base}.metal",
+            [dxc, "-spirv", "-fspv-target-env=vulkan1.0", "-fspv-entrypoint-name=main", "-T", profile,
+             "-E", entry, "-Fo", base + ".spv", SRC],
+            [dxc, "-T", profile, "-E", entry, "-Fo", base + ".dxil", SRC],
+            [spirv_cross, base + ".spv", "--msl", "--msl-version", "20100", "--output", base + ".metal"],
         ]
     return cmds
 
 
 def main():
+    os.makedirs(os.path.join(ROOT, WORK), exist_ok=True)
     if shutil.which("dxc") and shutil.which("spirv-cross"):
         for c in commands("dxc", "spirv-cross"):
-            subprocess.run(c, shell=True, check=True, cwd=ROOT)
+            subprocess.run(c, check=True, cwd=ROOT)
     else:
         if not shutil.which("docker"):
             sys.exit("build_shaders: needs dxc and spirv-cross on PATH, or Docker")
@@ -54,7 +57,7 @@ def main():
             f"curl -sSL -o /tmp/dxc.tgz {DXC_URL}",
             "mkdir -p /tmp/dxc && tar xzf /tmp/dxc.tgz -C /tmp/dxc",
             "export LD_LIBRARY_PATH=/tmp/dxc/lib",
-        ] + commands("/tmp/dxc/bin/dxc", "spirv-cross"))
+        ] + [shlex.join(c) for c in commands("/tmp/dxc/bin/dxc", "spirv-cross")])
         # DXC's Linux build is x86-64. Pull that variant explicitly: a cached
         # arm64 ubuntu:24.04 (Apple silicon) otherwise fails with "exec format error".
         subprocess.run(["docker", "pull", "-q", "--platform", "linux/amd64", "ubuntu:24.04"], check=True)

@@ -48,9 +48,11 @@ PolyOut vs_poly(PolyIn i) {
 // texture RAM (sheet 0 then sheet 1, 0x80000 dwords each, as the rasterizer
 // reads them), the luma RAM (one entry per dword, low byte), and the colour
 // translation table with the rasterizer's gamma already applied.
-[[vk::binding(0, 2)]] StructuredBuffer<uint> texram : register(t0, space2);
-[[vk::binding(1, 2)]] StructuredBuffer<uint> lumaram : register(t1, space2);
-[[vk::binding(2, 2)]] StructuredBuffer<uint> xlat : register(t2, space2);
+// SDL's D3D12 storage views are raw (R32_TYPELESS, zero structure stride).
+// ByteAddressBuffer matches those views and the same packed words on Vulkan/Metal.
+[[vk::binding(0, 2)]] ByteAddressBuffer texram : register(t0, space2);
+[[vk::binding(1, 2)]] ByteAddressBuffer lumaram : register(t1, space2);
+[[vk::binding(2, 2)]] ByteAddressBuffer xlat : register(t2, space2);
 
 static const uint log2_table[128] = {0, 2, 5, 8, 11, 14, 16, 19, 22, 25, 27, 30, 33, 35, 38, 40, 43, 46, 48, 51, 53, 56, 58, 61, 63, 65, 68, 70, 73, 75, 77, 80, 82, 84, 87, 89, 91, 93, 96, 98, 100, 102, 104, 106, 109, 111, 113, 115, 117, 119, 121, 123, 125, 127, 129, 132, 134, 136, 138, 140, 141, 143, 145, 147, 149, 151, 153, 155, 157, 159, 161, 162, 164, 166, 168, 170, 172, 173, 175, 177, 179, 181, 182, 184, 186, 188, 189, 191, 193, 194, 196, 198, 200, 201, 203, 205, 206, 208, 209, 211, 213, 214, 216, 218, 219, 221, 222, 224, 225, 227, 229, 230, 232, 233, 235, 236, 238, 239, 241, 242, 244, 245, 247, 248, 250, 251, 253, 254};
 
@@ -79,7 +81,7 @@ uint get_texel(uint base_x, uint base_y, int x, int y, uint sheet) {
         y2 ^= 1024;
     }
     const uint offset = uint((y2 / 2) * 512 + (x2 / 2));
-    uint texel = texram[sheet * 0x80000u + ((offset >> 1) & 0x7ffffu)];
+    uint texel = texram.Load(4u * (sheet * 0x80000u + ((offset >> 1) & 0x7ffffu)));
     if (offset & 1u) texel >>= 16;
     if ((y & 1) == 0) texel >>= 8;
     if ((x & 1) == 0) texel >>= 4;
@@ -181,11 +183,12 @@ float4 ps_poly(PolyOut i) : SV_Target {
         t &= 0xffu;
     }
     const uint lumabase = i.info.w & 0xffffu, pluma = i.info.w >> 16;
-    uint luma = ((lumaram[lumabase + (t >> 1)] & 0xffu) * pluma / 256u) & 0xffu;
+    uint luma = ((lumaram.Load(4u * (lumabase + (t >> 1))) & 0xffu) * pluma / 256u) & 0xffu;
     luma = min(luma, 0x3fu);
     const uint c = i.more.y;
     const uint cr = ((c >> 0) & 0x1fu) << 8, cg = 0x2000u + (((c >> 5) & 0x1fu) << 8), cb = 0x4000u + (((c >> 10) & 0x1fu) << 8);
-    return float4(float(xlat[cr + luma]) / 255.0, float(xlat[cg + luma]) / 255.0, float(xlat[cb + luma]) / 255.0, 1.0);
+    return float4(float(xlat.Load(4u * (cr + luma))) / 255.0, float(xlat.Load(4u * (cg + luma))) / 255.0,
+                  float(xlat.Load(4u * (cb + luma))) / 255.0, 1.0);
 }
 
 // A CPU-made layer (tilemaps) as a textured quad; pixels that are 0 are holes.
@@ -228,21 +231,21 @@ float4 ps_quad(QuadOut i) : SV_Target {
 //            the pens (0xAARRGGBB, 4096); [16 + 4096..] tile RAM words 0x4000 to
 //            0x6fff (line scroll tables, scroll registers, window masks), two
 //            per word
-[[vk::binding(0, 2)]] StructuredBuffer<uint> tilepix : register(t0, space2);
-[[vk::binding(1, 2)]] StructuredBuffer<uint> tiledata : register(t1, space2);
+[[vk::binding(0, 2)]] ByteAddressBuffer tilepix : register(t0, space2);
+[[vk::binding(1, 2)]] ByteAddressBuffer tiledata : register(t1, space2);
 
 static const uint kTilePens = 16u, kTileWords = 16u + 4096u;
 static const int kTileW = 496, kTileH = 384;
 
 uint tile_word(uint i) {
     const uint j = i - 0x4000u;
-    const uint d = tiledata[kTileWords + (j >> 1)];
+    const uint d = tiledata.Load(4u * (kTileWords + (j >> 1)));
     return (j & 1u) != 0u ? d >> 16 : d & 0xffffu;
 }
 
 uint tile_pixel(uint l, int x, int y) {
     const uint i = l * 0x40000u + uint(y & 511) * 512u + uint(x & 511);
-    const uint d = tilepix[i >> 1];
+    const uint d = tilepix.Load(4u * (i >> 1));
     return (i & 1u) != 0u ? d >> 16 : d & 0xffffu;
 }
 
@@ -319,16 +322,17 @@ float4 pen_color(uint argb) {
 // The back layers, behind the 3D layer, filling the target: 496 wide in the
 // centre, the widescreen margins as Video::fill_margins fills them.
 float4 ps_tiles_back(QuadOut i) : SV_Target {
-    const int margin = int(tiledata[0]);
-    const uint fill = tiledata[1];
-    const int scale = int(tiledata[2]);
+    const int margin = int(tiledata.Load(0u));
+    const uint fill = tiledata.Load(4u);
+    const int scale = int(tiledata.Load(8u));
     const int out_w = kTileW + 2 * margin;
     const int x = int(i.pos.x) / scale - margin, y = int(i.pos.y) / scale;
     if (margin > 0 && fill == 2u) { // stretched: column (x + 0.5) * W / out - 0.5, blended
         const float u = clamp((float(x + margin) + 0.5) * float(kTileW) / float(out_w) - 0.5, 0.0, float(kTileW - 1));
         const int a = int(u), b = min(a + 1, kTileW - 1);
         const float f = u - float(a);
-        const uint ca = tiledata[kTilePens + tile_back(a, y)], cb = tiledata[kTilePens + tile_back(b, y)];
+        const uint ca = tiledata.Load(4u * (kTilePens + tile_back(a, y)));
+        const uint cb = tiledata.Load(4u * (kTilePens + tile_back(b, y)));
         uint p = 0u;
         for (uint k = 0u; k < 24u; k += 8u) {
             const float c = float((ca >> k) & 0xffu) * (1.0 - f) + float((cb >> k) & 0xffu) * f;
@@ -341,18 +345,18 @@ float4 ps_tiles_back(QuadOut i) : SV_Target {
         if (fill == 1u) sx = 0, sy = 0; // the sky: the top-left pixel
         else sx = x < 0 ? 0 : kTileW - 1;
     }
-    return pen_color(tiledata[kTilePens + tile_back(sx, sy)]);
+    return pen_color(tiledata.Load(4u * (kTilePens + tile_back(sx, sy))));
 }
 
 // The front layers, over the 3D layer: 3 to 0, the last drawn winning; holes
 // where none draws.
 float4 ps_tiles_front(QuadOut i) : SV_Target {
-    const int scale = int(tiledata[2]);
-    const int x = int(i.pos.x) / scale - int(tiledata[0]), y = int(i.pos.y) / scale;
+    const int scale = int(tiledata.Load(8u));
+    const int x = int(i.pos.x) / scale - int(tiledata.Load(0u)), y = int(i.pos.y) / scale;
     if (x < 0 || x >= kTileW) discard;
     uint pen;
     for (uint l = 1u; l < 8u; l += 2u)
-        if (tile_layer(l, false, x, y, pen)) return pen_color(tiledata[kTilePens + pen]);
+        if (tile_layer(l, false, x, y, pen)) return pen_color(tiledata.Load(4u * (kTilePens + pen)));
     discard;
     return float4(0.0, 0.0, 0.0, 0.0);
 }

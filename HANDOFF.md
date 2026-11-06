@@ -1,5 +1,41 @@
 # Handoff
 
+## Windows hardware renderer storage reads (2026-11-06)
+
+SDL's Direct3D 12 backend creates storage-buffer SRVs as R32_TYPELESS raw
+views with zero structure stride. The shared HLSL instead declared
+StructuredBuffer<uint>: texture, luma, colour translation and both tilemap
+buffers read black, while CPU-coloured solid polygons remained visible.
+All five resources now use ByteAddressBuffer with four-byte word offsets.
+SPIR-V, DXIL and Metal payloads were regenerated from the same HLSL source;
+CPU uploads and the software rasterizer are unchanged. This follows the
+design document's Renderer and Platform layer & build sections.
+
+The shader builder now runs native tools with argument lists and creates its
+working directory through Python, so regeneration works on Windows without
+POSIX shell commands. Tool versions are recorded in THIRD_PARTY.md.
+
+The ROM-free gpu_renderer tests run by default when SDL is available, using
+the app's device creation properties and explicitly selecting each backend.
+They check CPU-verified background tiles, foreground tiles, textured and
+solid polygons, then changed texture RAM. A synthetic Video must mark its
+palette/colour translation dirty, as the board normally does during uploads.
+Unavailable GPU backends skip with status 77. Original shaders reproduced
+the black storage reads under Direct3D 12; original Vulkan passed. Existing
+Windows logs for both game sets named direct3d12, so a separate Vulkan
+failure has not been established here.
+
+Validation on Windows, Clang 19.1.5, AMD Radeon RX 9060 XT: both corrected
+backend readback tests pass. A freshly generated Deluxe '93 game and all
+tools build. Attract captures at frames 600 and 1200 show textures and HUD;
+Direct3D 12 and Vulkan match all 190,464 pixels in each capture. All 20
+runnable CTests pass (four required rerunning outside the sandbox's
+Application Control policy); two optional Lua tests skip. Baseline logs,
+the original test executable and captures remain under ignored build/.
+These are offscreen checks, not live presentation or new MAME parity.
+Metal was regenerated but not run. The local Revision A archive was
+rejected for missing epr-16530a.12, so that game was not rebuilt.
+
 ## Widescreen opponent visibility (2026-10-14)
 
 Both ROM revisions use enhancement hooks before the opponent car-cell bit test
