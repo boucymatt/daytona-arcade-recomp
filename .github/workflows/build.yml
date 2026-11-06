@@ -56,3 +56,9 @@ jobs:
         run: ./setup.sh
       - name: Tests
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: macOS app bundle
+        if: runner.os == 'macOS'
+        run: |
+          test -x build/daytona.app/Contents/MacOS/daytona
+          plutil -lint build/daytona.app/Contents/Info.plist
+          codesign --verify --deep --strict build/daytona.app

@@ -2,6 +2,11 @@ plugins {
     id 'com.android.application'
 }
 
+// One installed app contains both recompiled programs. Generated sources stay
+// outside the Android project; overrides may be absolute or relative to it.
+def generatedRoot = rootProject.file(findProperty('M2_GEN_ROOT') ?: System.getenv('M2_GEN_ROOT') ?: '../../../build/gen')
+def revisionGeneratedRoot = rootProject.file(findProperty('M2_REV_GEN_ROOT') ?: System.getenv('M2_REV_GEN_ROOT') ?: '../../../build-daytona/gen')
+
 android {
     namespace 'com.boucydesigns.daytona'
     compileSdk 36
@@ -17,7 +22,9 @@ android {
         externalNativeBuild {
             cmake {
                 arguments '-DCMAKE_BUILD_TYPE=Release',
-                          "-DM2_GEN_ROOT=${rootProject.projectDir}/../../../build/gen"
+                          '-DM2_ROMSET=daytona93', '-DM2_MULTI_ROMSETS=ON',
+                          "-DM2_GEN_ROOT=${generatedRoot.canonicalPath.replace('\\', '/')}",
+                          "-DM2_REV_GEN_ROOT=${revisionGeneratedRoot.canonicalPath.replace('\\', '/')}"
                 targets   'daytona'
                 cppFlags '-std=c++20'
             }

@@ -1,5 +1,40 @@
 # Mobile port handoff
 
+## 2026-11-06: both ROM sets in one app
+
+Android/iOS builds enable M2_MULTI_ROMSETS and require both host-generated
+sets: build/gen for Deluxe '93, build-daytona/gen for Revision A. Both roots
+are configurable. Generated i960/sound sources are included through namespace
+wrappers with shared Env types; identical TGP output is shared and checked at
+configure time. One installed app detects either archive and offers a Version
+selector, retaining separate configurations, cabinet saves and imported ROMs.
+The last selected version is remembered. Switching stops audio and fully
+destroys the old machine/frontend before selecting the new generated program.
+No subprocess, ROM archive or extracted asset is included in the package.
+
+The iPhoneOS arm64 app and unsigned IPA build. ZIP integrity, plist,
+architecture, system dependencies and both generated program/sound symbol
+groups pass checks. Host runtime verification runs Deluxe -> Revision A ->
+Deluxe for 600 frames each and matches isolated builds exactly, including
+screens, counters and WAV bytes. New dispatch and preference-persistence
+tests pass, as do 19 Android-path and 2 desktop-path import cases. The existing
+unrelated fp test fails with the same 25,848 scale mismatches.
+
+The final Android arm64 debug APK builds too. ZIP CRC, v2 signature and 16 KiB
+alignment checks pass, and the packaged libmain.so exports both generated
+i960/sound groups. Output: android/app/build/outputs/apk/debug/app-debug.apk
+(26,437,233 bytes). Build and verification records are under
+build/android-dual-build.log and build/android-verification/ at repository
+root. No device install or runtime test was performed.
+
+Fresh Android imports use imported-<set>.rom in the existing import directory,
+so importing one set cannot replace the other's copy. iOS uses unique files
+under rom-imports; old saved paths continue to work. Archive previews preserve
+the current version's configuration, keep a just-imported archive when its
+version is selected, and cannot switch versions while a picker is pending.
+Test Version selection, archive import and repeated switches on both devices;
+headless parity does not verify SDL/UIKit/Android lifecycle behaviour.
+
 ## 2026-10-07: GPU startup compatibility and visible failures
 
 Rebased onto original upstream 0435a46. Shared GPU creation drops unused

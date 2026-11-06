@@ -1,17 +1,21 @@
 # Android ROM file access
 
-Use **Browse** and select your own `daytona93.zip` or `.7z`. Android grants the
-app read access to that document. A `content://...` value is a document URI,
-not a filename: it must not be decoded into a `/sdcard/...` path or opened
-with `std::ifstream`.
+Use **Browse** and select your own `daytona93.zip`, `daytona.zip`, or `.7z`
+archive. The app detects Deluxe '93 or Revision A and runs that version in
+the same installed app, keeping each version's settings and saves separate.
+Android grants the app read access to that document. A `content://...` value
+is a document URI, not a filename: it must not be decoded into a
+`/sdcard/...` path or opened with `std::ifstream`.
 
 The launcher now opens the selected URI read-only with `SDL_IOFromFile`.
 It streams the bytes into an app-private temporary file, runs the existing
 `check_rom_set` validation, and only then replaces `imported-daytona93.rom`
-in the SDL preferences directory. The runtime detects ZIP/7z by signature,
-so the internal `.rom` suffix does not change the archive format. The saved
-configuration points to this ordinary local file; future launches and resets
-do not depend on the document provider's temporary URI grant.
+or `imported-daytona.rom` in app-private storage. These two imports persist
+independently; the existing import directory is retained for compatibility.
+The runtime detects ZIP/7z by signature, so the internal `.rom` suffix does
+not change the archive format. The saved configuration points to this
+ordinary local file; future launches and resets do not depend on the
+document provider's temporary URI grant.
 
 Failed reads and failed verification discard the temporary file. The existing
 import is not replaced until validation and copying succeed. Copying uses a
@@ -26,12 +30,13 @@ Android 13/API 33 and higher. Do not add broad permissions or strip the URI.
 
 ## Update an existing installation
 
-From the repository root, on branch `mobile`:
+From the repository root, after generating both sets' code as described in
+[README.md](README.md):
 
 ```sh
-git pull --ff-only origin mobile
+git pull --ff-only
 cd platform/mobile/android
-gradle :app:assembleDebug
+bash gradlew :app:assembleDebug
 adb -s DEVICE_SERIAL install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 

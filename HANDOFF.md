@@ -1,5 +1,85 @@
 # Handoff
 
+## Both ROM sets in one mobile app (2026-11-06)
+
+Android and iOS now enable `M2_MULTI_ROMSETS` and include both Deluxe '93
+and Revision A in one app. `M2_GEN_ROOT` supplies Deluxe's generated sources;
+`M2_REV_GEN_ROOT` supplies Revision A's, normally `build-daytona/gen`.
+Configuration rejects incomplete sets and differing generated TGP files.
+Namespace wrappers compile the unchanged i960/sound sources with shared Env
+types; the byte-identical TGP implementation is compiled once. The runtime
+dispatches generated entry points and ROM layouts using the selected set.
+Desktop and console builds retain their configured single-set selection;
+the Vita/Dreamcast source lists include the new selection implementation.
+Design basis: Architecture and Platform layer & build.
+
+The mobile launcher detects either archive and also has a Version selector.
+Switching saves old NVRAM/settings, closes audio, and destroys the machine
+and SDL/GPU resources before selecting and opening the other version. Each
+version keeps its own launcher.ini, EEPROM and backup RAM; the last selected
+version is remembered per profile. Previewing another archive preserves the
+current version's saved path. Android imports now use independent
+`imported-daytona93.rom` and `imported-daytona.rom` files, retaining the old
+import directory. iOS keeps UUID imports in a shared imports directory; old
+saved absolute paths remain valid. Version changes are disabled while a file
+picker callback is pending. Both archive previews show the committed path.
+
+Validation: the arm64 iPhoneOS app and unsigned IPA build with Xcode; archive
+integrity, plist, architecture, system-library dependencies and both i960/sound
+entry-point groups are verified. A host dual-program build runs Deluxe ->
+Revision A -> Deluxe in one process, 600 frames each, matching each isolated
+single-set baseline exactly: screen hashes, i960/TGP/interrupt and sound
+counters, drive commands, and WAV bytes. Screen hashes are 36945e52a376dc48
+for Deluxe and 4156b893b87d2878 for Revision A. This checks native dispatch,
+not new MAME parity or device UI behaviour.
+
+The Android arm64 debug APK also builds with the pinned SDK/NDK/CMake/Gradle
+toolchain. The final incremental build includes the launcher fixes. ZIP CRC,
+v2 signing and 16 KiB alignment checks pass; the shipped libmain.so exports
+both i960 and both sound entry-point groups. APK output is
+`platform/mobile/android/app/build/outputs/apk/debug/app-debug.apk`; iOS output
+is `build/ios/Daytona-unsigned.ipa` (sign before installation). Build and APK
+verification logs are under ignored `build/`. Existing accepted Android SDK
+licences and the local debug signing identity were reused; downloaded tooling
+and caches are isolated under `build/`.
+
+The new dispatch and selection-persistence CTests pass; Android import tests
+pass 19 cases and the desktop path passes 2. Three setup tests pass. The full
+host suite has 19 passes, 3 skips (Metal and optional Lua), and the existing
+`fp` failure (25,848 scale fast/reference mismatches). Device testing of the
+Version selector, Files/document-provider access and repeated switches remains
+to do; prior mobile device testing covered the single Deluxe app.
+
+## macOS application bundle (2026-11-06)
+
+Desktop macOS builds now produce `daytona.app` alongside the existing
+command-line executables. The CMake `daytona_bundle` target runs in normal
+builds, packages the launcher and both available games in `Contents/MacOS`,
+and signs each executable and the finished app ad hoc. An independent
+Revision A build refreshes the shared app; a standalone build gets its own.
+Setup prints `open build/daytona.app`. The app can be moved without the
+build directory; ROM archives remain external and saves use the existing
+per-set user folders. This follows Platform layer & build in the design.
+
+Both launcher lookups now share an executable-directory helper. SDL's
+macOS base path points at `Contents/Resources` in an app, so it cannot locate
+the sibling games. macOS instead resolves `_NSGetExecutablePath`, including
+symlinks. Signing only the outer app also failed for an unsigned Intel
+helper; explicit helper signing fixes that case.
+
+Validation: both local arm64 ROM-set games and the app build successfully.
+The app passes plist and deep, strict signature checks and links only system
+libraries. A copy relocated to a path containing spaces outside the repository
+dispatches both ROM sets to their bundled games (early argument-validation
+smoke test, not gameplay). Temporary fixtures also cover Ninja Multi-Config
+Release, independent Revision A refresh followed by a main refresh, ROM-free
+packaging, and signing an initially unsigned Intel helper. Setup's three
+regression tests pass. Of 21 existing CTests, 17 pass, Metal and two optional
+Lua tests skip, and `fp` fails with 25,848 scale fast/reference mismatches;
+rebuilding that test reproduces the failure. No floating-point code changed.
+CI now checks the ROM-free macOS app's executable, plist and signature.
+Developer signing, notarisation and universal release packaging remain open.
+
 ## Windows hardware renderer storage reads (2026-11-06)
 
 SDL's Direct3D 12 backend creates storage-buffer SRVs as R32_TYPELESS raw

@@ -37,6 +37,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -288,11 +289,15 @@ def main():
     for label, exe in games:
         print(f"\n{label} is built ({os.path.relpath(exe, ROOT)}).")
     if games:
-        launcher = next((p for p in (os.path.join(build, "daytona" + EXE), os.path.join(build, "Release", "daytona" + EXE))
+        launcher_name = "daytona.app" if sys.platform == "darwin" else "daytona" + EXE
+        launcher = next((p for p in (os.path.join(build, launcher_name), os.path.join(build, "Release", launcher_name))
                          if os.path.exists(p)), None)
         if launcher:
+            command = os.path.relpath(launcher, ROOT)
+            if sys.platform == "darwin":
+                command = "open " + shlex.quote(command)
             print("\nStart it with the launcher (choose your ROM set there; it opens that game):\n\n    "
-                  + os.path.relpath(launcher, ROOT))
+                  + command)
     if games:
         print()
 

@@ -12,6 +12,7 @@ if(ANDROID OR IOS)
 endif()
 set(M2_GEN_ROOT "${CMAKE_BINARY_DIR}/gen" CACHE PATH
     "Directory containing recompiled daytona93/daytona93_tgp/daytona93_snd sources")
+option(M2_MULTI_ROMSETS "Include both Daytona ROM sets in one application" ${M2_MOBILE})
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -107,6 +108,7 @@ add_library(runtime STATIC
     src/runtime/game_loop.cpp
     src/runtime/zip.cpp
     src/runtime/rom_import.cpp
+    src/runtime/rom_set.cpp
     src/runtime/archive.cpp
     src/runtime/m2_replay_bus.cpp
     src/runtime/lockstep.cpp
@@ -121,6 +123,9 @@ add_library(runtime STATIC
 )
 target_include_directories(runtime PUBLIC src)
 target_compile_definitions(runtime PUBLIC M2_ROMSET="${M2_ROMSET}")
+if(M2_MULTI_ROMSETS)
+    target_compile_definitions(runtime PUBLIC M2_MULTI_ROMSETS=1)
+endif()
 # 7z ROM sets: the 7-Zip LZMA SDK's decoder (public-domain files only),
 # fetched by scripts/setup.py into extern/lzma.
 set(LZMA_DIR ${CMAKE_SOURCE_DIR}/extern/lzma/C)
@@ -244,15 +249,24 @@ endif()
 set(GEN_DIR ${M2_GEN_ROOT}/${M2_ROMSET})
 set(TGP_GEN ${M2_GEN_ROOT}/${M2_ROMSET}_tgp/tgp_gen.cpp)
 set(SND_GEN ${M2_GEN_ROOT}/${M2_ROMSET}_snd/snd_gen.cpp)
-if(EXISTS ${GEN_DIR}/gen_table.cpp AND EXISTS ${TGP_GEN} AND EXISTS ${SND_GEN})
+set(_m2_game_available OFF)
+if(M2_MULTI_ROMSETS)
+    include(cmake/multi_romsets.cmake)
+    set(_m2_game_available ON)
+elseif(EXISTS ${GEN_DIR}/gen_table.cpp AND EXISTS ${TGP_GEN} AND EXISTS ${SND_GEN})
     file(GLOB GEN_SOURCES ${GEN_DIR}/*.cpp)
-    add_executable(m2native tools/m2native/main.cpp ${GEN_SOURCES} ${TGP_GEN} ${SND_GEN})
-    target_link_libraries(m2native PRIVATE runtime)
-    # The game on its own: native board runtime, no trace.
-    add_executable(m2run tools/m2run/main.cpp src/app/link_socket.cpp ${GEN_SOURCES} ${TGP_GEN} ${SND_GEN})
-    target_link_libraries(m2run PRIVATE runtime)
-    if(WIN32)
-        target_link_libraries(m2run PRIVATE ws2_32) # link play's sockets
+    set(_m2_game_available ON)
+endif()
+if(_m2_game_available)
+    if(NOT M2_MULTI_ROMSETS)
+        add_executable(m2native tools/m2native/main.cpp ${GEN_SOURCES} ${TGP_GEN} ${SND_GEN})
+        target_link_libraries(m2native PRIVATE runtime)
+        # The game on its own: native board runtime, no trace.
+        add_executable(m2run tools/m2run/main.cpp src/app/link_socket.cpp ${GEN_SOURCES} ${TGP_GEN} ${SND_GEN})
+        target_link_libraries(m2run PRIVATE runtime)
+        if(WIN32)
+            target_link_libraries(m2run PRIVATE ws2_32) # link play's sockets
+        endif()
     endif()
 
     # The game in a window (needs the app objects below).
@@ -309,9 +323,11 @@ if(EXISTS ${GEN_DIR}/gen_table.cpp AND EXISTS ${TGP_GEN} AND EXISTS ${SND_GEN})
         if(WIN32)
             target_link_libraries(${M2_GAME} PRIVATE ws2_32) # link play's sockets
         endif()
-        # Headless frames through the hardware renderer, to compare with m2run's.
-        add_executable(m2gpushot tools/m2gpushot/main.cpp ${GEN_SOURCES} ${TGP_GEN} ${SND_GEN})
-        target_link_libraries(m2gpushot PRIVATE runtime gpurender)
+        if(NOT M2_MULTI_ROMSETS)
+            # Headless frames through the hardware renderer, to compare with m2run's.
+            add_executable(m2gpushot tools/m2gpushot/main.cpp ${GEN_SOURCES} ${TGP_GEN} ${SND_GEN})
+            target_link_libraries(m2gpushot PRIVATE runtime gpurender)
+        endif()
     else()
         message(STATUS "extern/sdl3 not found: skipping the windowed game (run scripts/setup.py)")
     endif()
@@ -330,6 +346,12 @@ if(TARGET daytona_app AND NOT ANDROID AND NOT IOS AND M2_ROMSET STREQUAL "dayton
     target_link_libraries(daytona_launcher PRIVATE runtime ${M2_SDL_TARGET})
 endif()
 
+# Finder-launchable desktop app, containing both available games. Keep the
+# command-line executables too; each ROM set's build refreshes the bundle.
+if(APPLE AND NOT IOS AND TARGET daytona_app)
+    include(cmake/macos_app.cmake)
+endif()
+
 # The TGP recompiler and, when it has been run, the lockstep check of its
 # output against MAME's TGP log.
 # The ROM set importer (zip or 7z) for the build.
@@ -338,7 +360,7 @@ target_link_libraries(m2import PRIVATE runtime)
 
 add_executable(m2tgprecomp tools/m2tgprecomp/main.cpp)
 target_include_directories(m2tgprecomp PRIVATE src)
-if(EXISTS ${TGP_GEN})
+if(NOT M2_MULTI_ROMSETS AND EXISTS ${TGP_GEN})
     add_executable(m2tgpcheck tools/m2tgpcheck/main.cpp ${TGP_GEN})
     target_link_libraries(m2tgpcheck PRIVATE runtime)
     # The per-instruction hook exists only in this test build.
@@ -350,7 +372,7 @@ endif()
 
 # The lockstep check of the recompiled sound 68000 against MAME's log
 # (M2TRACE_SNDLOG, patches/mame/0003).
-if(EXISTS ${SND_GEN})
+if(NOT M2_MULTI_ROMSETS AND EXISTS ${SND_GEN})
     add_executable(m2sndcheck tools/m2sndcheck/main.cpp ${SND_GEN})
     target_link_libraries(m2sndcheck PRIVATE runtime)
     if(NOT MSVC)
@@ -371,6 +393,14 @@ add_executable(traceinfo tools/traceinfo/main.cpp)
 target_link_libraries(traceinfo PRIVATE trace)
 
 enable_testing()
+
+# Generated dispatch and selection can be checked with synthetic entry points;
+# no ROM archive or generated game sources are needed for this test.
+add_executable(test_multi_romsets tests/test_multi_romsets.cpp
+    src/runtime/rom_set.cpp src/runtime/generated_dispatch.cpp)
+target_include_directories(test_multi_romsets PRIVATE src)
+target_compile_definitions(test_multi_romsets PRIVATE M2_MULTI_ROMSETS=1 M2_ROMSET="daytona93")
+add_test(NAME multi_romsets COMMAND test_multi_romsets)
 
 # Offscreen production shader readback; unavailable GPU backends skip at runtime.
 option(M2_GPU_TESTS "Build ROM-free hardware renderer readback tests" ON)
@@ -448,6 +478,11 @@ if(TARGET SDL3::SDL3-static)
     target_include_directories(test_app_config PRIVATE src)
     target_link_libraries(test_app_config PRIVATE runtime SDL3::SDL3-static)
     add_test(NAME app_config COMMAND test_app_config)
+    add_executable(test_rom_selection tests/test_rom_selection.cpp src/app/config.cpp src/app/controls.cpp)
+    target_include_directories(test_rom_selection PRIVATE src)
+    target_compile_definitions(test_rom_selection PRIVATE SDL_GetPrefPath=Test_GetPrefPath)
+    target_link_libraries(test_rom_selection PRIVATE SDL3::SDL3-static)
+    add_test(NAME rom_selection COMMAND test_rom_selection)
     add_executable(test_app_controls tests/test_app_controls.cpp src/app/controls.cpp src/app/ffb.cpp)
     target_include_directories(test_app_controls PRIVATE src)
     target_link_libraries(test_app_controls PRIVATE runtime SDL3::SDL3-static)

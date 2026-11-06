@@ -27,6 +27,9 @@
 #include "runtime/native_sound_engine.h"
 #include "runtime/game_loop.h"
 #include "runtime/rom_import.h"
+#ifdef M2_MULTI_ROMSETS
+#include "app/rom_selection.h"
+#endif
 
 #include "backends/imgui_impl_sdl3.h"
 #include "backends/imgui_impl_sdlgpu3.h"
@@ -193,16 +196,33 @@ void open_log() {
 #endif
 }
 
-int main(int argc, char **argv) {
+struct GameSwitch {
+    std::string romset;
+    std::vector<std::string> args;
+    bool hold_test = false;
+};
+
+// Returning releases the old machine and all audio/GPU resources before the
+// mobile entry point selects another set of recompiled programs.
+int run_app(int argc, char **argv, GameSwitch &next_game) {
     for (int i = 1; i + 1 < argc; i++) // before anything reads or writes the data folder
         if (!std::strcmp(argv[i], "--profile")) app::Config::profile = argv[i + 1];
     open_log();
     app::Config cfg;
     cfg.load();
+    cfg.hold_test = next_game.hold_test;
+    next_game = {};
+    std::string rom_override;
     uint64_t max_frames = 0;
     bool autostart = false;
     for (int i = 1; i < argc; i++) {
-        if (!std::strcmp(argv[i], "--rom") && i + 1 < argc) cfg.rom_path = argv[++i];
+        if (!std::strcmp(argv[i], "--rom") && i + 1 < argc) {
+#ifdef M2_MULTI_ROMSETS
+            rom_override = argv[++i];
+#else
+            cfg.rom_path = argv[++i];
+#endif
+        }
         else if (!std::strcmp(argv[i], "--gpu") && i + 1 < argc) cfg.gpu = argv[++i];
         else if (!std::strcmp(argv[i], "--audio")) {
             if (i + 1 == argc || (std::strcmp(argv[i + 1], "native") && std::strcmp(argv[i + 1], "reference"))) {
@@ -309,7 +329,7 @@ int main(int argc, char **argv) {
     SDL_GPUTexture *shown = screen; // the last frame's texture, and its scale
     int shown_scale = 1;
 
-    app::Launcher launcher(cfg, window);
+    app::Launcher launcher(cfg, window, rom_override);
     app::ForceFeedback ffb; // the drive board on the steering device
     std::unique_ptr<app::TcpLink> link; // link play (declared first: outlives the game, which holds it)
     std::unique_ptr<rt::GameLoop> game;
@@ -654,6 +674,7 @@ int main(int argc, char **argv) {
             case app::Launcher::Resume: in_launcher = false; break;
             case app::Launcher::Quit: running = false; break;
             case app::Launcher::OtherGame: hand_over = hand_over_start = true, running = false; break;
+            case app::Launcher::ChangeGame: hand_over = true, hand_over_start = false, running = false; break;
             default: break;
             }
 #ifdef M2_MOBILE
@@ -730,16 +751,27 @@ int main(int argc, char **argv) {
     ffb.close();
     devices.close_all();
     if (hand_over) {
-        // One launcher for both games: start the other set's executable with
-        // this archive, and this one's other options (--profile, --gpu, ...).
-        std::vector<std::string> args{launcher.other_game()};
+        // Forward this archive and the current command-line options. Mobile
+        // returns a switch request; desktop starts the other executable.
+        std::vector<std::string> args{
+#ifdef M2_MULTI_ROMSETS
+            argv[0]
+#else
+            launcher.other_game()
+#endif
+        };
         for (int i = 1; i < argc; i++) {
             if (!std::strcmp(argv[i], "--rom") && i + 1 < argc) { ++i; continue; }
             if (!std::strcmp(argv[i], "--autostart")) continue;
             args.push_back(argv[i]);
         }
-        args.insert(args.end(), {"--rom", launcher.other_rom()});
+        if (!launcher.other_rom().empty()) args.insert(args.end(), {"--rom", launcher.other_rom()});
         if (hand_over_start) args.push_back("--autostart");
+#ifdef M2_MULTI_ROMSETS
+        next_game.romset = launcher.other_set();
+        next_game.args = std::move(args);
+        next_game.hold_test = cfg.hold_test;
+#else
         std::vector<const char *> c_args;
         for (const auto &a : args) c_args.push_back(a.c_str());
         c_args.push_back(nullptr);
@@ -748,7 +780,32 @@ int main(int argc, char **argv) {
         std::fflush(stdout);
         if (SDL_Process *p = SDL_CreateProcess(c_args.data(), false)) SDL_DestroyProcess(p); // it carries on alone
         else std::fprintf(stderr, "daytona: could not start %s (%s)\n", launcher.other_game().c_str(), SDL_GetError());
+#endif
     }
     SDL_Quit();
     return 0;
+}
+
+int main(int argc, char **argv) {
+    GameSwitch next_game;
+#ifdef M2_MULTI_ROMSETS
+    for (int i = 1; i + 1 < argc; i++)
+        if (!std::strcmp(argv[i], "--profile")) app::Config::profile = argv[i + 1];
+    app::restore_rom_selection();
+    std::vector<std::string> args(argv, argv + argc);
+    for (;;) {
+        std::vector<char *> pointers;
+        for (auto &arg : args) pointers.push_back(arg.data());
+        pointers.push_back(nullptr);
+        const int result = run_app(int(args.size()), pointers.data(), next_game);
+        if (result || next_game.romset.empty()) return result;
+        // run_app's locals, including GameLoop and its sound board, have all
+        // been destroyed. No callbacks can execute the previous set's code.
+        if (!rt::select_rom_set(next_game.romset)) return 1;
+        app::save_rom_selection();
+        args = std::move(next_game.args);
+    }
+#else
+    return run_app(argc, argv, next_game);
+#endif
 }

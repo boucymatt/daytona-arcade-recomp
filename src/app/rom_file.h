@@ -33,8 +33,6 @@ public:
         static std::atomic<std::uint64_t> sequence{0};
         temporary_ = base + "rom-import-" + std::to_string(SDL_GetTicksNS()) + "-" +
                      std::to_string(sequence.fetch_add(1)) + ".tmp";
-        // The archive loader detects ZIP/7z by signature, not by extension.
-        destination_ = base + "imported-daytona93.rom";
         path_ = temporary_;
         try {
             copy(source);
@@ -53,21 +51,34 @@ public:
 
     const std::string &path() const { return path_; }
 
-    // Call only after check_rom_set accepts the staged file. On Android the
-    // same-directory rename atomically replaces the old import. Failed reads,
-    // failed validation and failed renames leave the previous import intact.
-    std::string commit() {
+    static constexpr const char *default_rom_set() {
+#ifdef M2_ROMSET
+        return M2_ROMSET;
+#else
+        return "daytona93";
+#endif
+    }
+
+    // Call only after check_rom_set accepts the staged file for this set.
+    // Each set keeps its own import. The same-directory rename atomically
+    // replaces only that set's old copy; failed imports leave both intact.
+    std::string commit(const std::string &romset = default_rom_set()) {
+        if (romset != "daytona93" && romset != "daytona")
+            throw std::runtime_error("Cannot save imported ROM: unknown ROM set.");
         if (temporary_.empty()) return path_;
+        // The archive loader detects ZIP/7z by signature, not by extension.
+        const auto destination = std::filesystem::path(temporary_).parent_path() /
+                                 ("imported-" + romset + ".rom");
         std::error_code ec;
-        std::filesystem::rename(temporary_, destination_, ec);
+        std::filesystem::rename(temporary_, destination, ec);
         if (ec) throw std::runtime_error("Cannot save imported ROM: " + ec.message());
-        path_ = destination_;
+        path_ = destination.string();
         temporary_.clear();
         return path_;
     }
 
 private:
-    std::string path_, temporary_, destination_;
+    std::string path_, temporary_;
 
     void discard() noexcept {
         if (temporary_.empty()) return;

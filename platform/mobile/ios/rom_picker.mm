@@ -17,7 +17,9 @@ static DaytonaRomPicker *activePicker;
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *source = urls.firstObject;
     BOOL scoped = [source startAccessingSecurityScopedResource];
-    char *pref = SDL_GetPrefPath("daytona-recomp", "daytona93");
+    // Imports are not assigned to a game until the archive has been checked.
+    // Unique files let both versions keep their previously selected archive.
+    char *pref = SDL_GetPrefPath("daytona-recomp", "rom-imports");
     NSError *error = nil;
     NSString *path = pref ? [[NSString stringWithUTF8String:pref]
         stringByAppendingPathComponent:[NSString stringWithFormat:@"rom-%@.%@", NSUUID.UUID.UUIDString, source.pathExtension]] : nil;

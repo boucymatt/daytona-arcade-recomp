@@ -377,10 +377,26 @@ One CMake project, C++20, SDL3 for window, input, haptics, audio and GPU, so pla
 | Windows 10/11 | x86-64, ARM64 | Vulkan or D3D12 | MSVC or clang-cl | Zip with exe |
 | macOS 12+ | ARM64, x86-64 | Metal | Apple clang | Signed, notarised .app (universal) |
 | Linux | x86-64, ARM64 | Vulkan | GCC or clang | AppImage + Flatpak |
-| Android 10+ | ARM64 (x86-64 for emulators) | Vulkan | NDK clang | APK; generated code built by the desktop importer, or on device, then loaded (decision pending) |
+| Android 10+ | ARM64 | Vulkan | NDK clang | APK containing both statically recompiled ROM-set programs |
+| iOS 15+ | ARM64 | Metal | Apple clang | App/IPA containing both statically recompiled ROM-set programs |
 | Raspberry Pi 4/5 | ARM64 (64-bit Pi OS) | Vulkan (V3DV) | GCC or clang | Linux ARM64 build |
 
 The generated code is plain portable C++20 (no host assembly, no JIT), so the same output compiles for every row above.
+
+Desktop macOS builds produce `daytona.app` alongside the command-line
+executables. The app contains the launcher and both available ROM-set games
+under `Contents/MacOS`; each set's build refreshes it. Local apps are ad-hoc
+signed for the configured architecture. Developer signing, notarisation and
+universal release packaging remain release steps.
+
+Android and iOS include both ROM sets in one executable. Namespace wrappers
+compile the generated i960 and sound programs without modifying their source;
+the common TGP implementation is shared only when both generated files match.
+The launcher can detect an archive or select a version explicitly. Switching
+saves the current cabinet, stops audio, and destroys the current machine and
+frontend resources before selecting the other program and loading its settings.
+The last selected version is remembered; settings, NVRAM and Android archive
+imports remain independent per set. ROM archives are supplied by the user.
 
 **ROM handling**
 

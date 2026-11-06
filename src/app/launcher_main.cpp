@@ -5,6 +5,7 @@
 // Deluxe '93's (its launcher remembers the last archive, and hands over to
 // Revision A's game for that set), or Revision A's if it is the only one
 // built. The launcher screen, settings and saves are the games' own.
+#include "app/executable_dir.h"
 #include "runtime/rom_import.h"
 
 #include <SDL3/SDL.h>
@@ -29,8 +30,8 @@ constexpr const char *kExe = "";
 #endif
 
 std::string beside(const char *name) {
-    const char *base = SDL_GetBasePath();
-    return std::string(base ? base : "") + name + kExe;
+    const auto base = app::executable_dir();
+    return base.empty() ? "" : (base / (std::string(name) + kExe)).string();
 }
 
 bool built(const std::string &path) {

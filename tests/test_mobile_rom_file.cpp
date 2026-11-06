@@ -109,6 +109,34 @@ int main(int argc, char **argv) {
         ++cases;
 
         const std::string previous = bytes;
+        const fs::path revision = root / "imported-daytona.rom";
+        const std::string revision_bytes = "verified Revision A archive";
+        bytes = revision_bytes;
+        {
+            app::RomFile imported(uri);
+            require(imported.commit("daytona") == revision.string(), "Revision A committed to the wrong path");
+            require(imported.commit("daytona") == revision.string(), "Revision A commit not idempotent");
+        }
+        require(read(destination) == previous, "Revision A import overwrote Deluxe '93");
+        require(read(revision) == revision_bytes, "Revision A import missing");
+        no_temporary_files();
+        ++cases;
+
+        bytes = previous;
+        {
+            app::RomFile imported(uri);
+            imported.commit("daytona93");
+        }
+        require(read(revision) == revision_bytes, "Deluxe '93 import overwrote Revision A");
+        no_temporary_files();
+        ++cases;
+
+        for (const std::string bad : {"", "daytonas", "../daytona", "daytona/other"}) {
+            fails([&] { app::RomFile imported(uri); imported.commit(bad); });
+            require(read(destination) == previous && read(revision) == revision_bytes,
+                    "unknown set changed a saved archive");
+        }
+
         bytes = "unverified data";
         {
             app::RomFile rejected(uri);
@@ -116,6 +144,7 @@ int main(int argc, char **argv) {
             // Not calling commit models a rejected ROM manifest.
         }
         require(read(destination) == previous, "validation failure replaced the good import");
+        require(read(revision) == revision_bytes, "validation failure replaced Revision A");
         no_temporary_files();
         ++cases;
 

@@ -79,7 +79,7 @@ GAME_DEFS := -DM2_ROMSET='"$(SET)"' -DM2_DC_MEMORY -DM2_DC_SPIN_SKIP -DM2_DC_SPE
 O3FLAGS = $(subst -O2,-O3,$(CXXFLAGS)) -funroll-loops
 GEN_FLAGS := $(subst -O2,-Os,$(CXXFLAGS)) $(GAME_DEFS) -Wno-unused-label
 
-RUNTIME := cpu tgp m2_tgp_board geo raster video m2_board game_loop zip rom_import archive m2_replay_bus \
+RUNTIME := cpu tgp m2_tgp_board geo raster video m2_board game_loop zip rom_import rom_set archive m2_replay_bus \
            lockstep snd_cpu multipcm sound_board native_sample_mixer native_sound_sequencer native_sound_engine \
            enhance comm_board
 # SoftFloat's file list, from the main tree's CMake list.

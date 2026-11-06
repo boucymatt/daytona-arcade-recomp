@@ -1,4 +1,5 @@
 #include "app/launcher.h"
+#include "app/executable_dir.h"
 #include "app/rom_file.h"
 #ifdef SDL_PLATFORM_IOS
 #include "rom_picker.h"
@@ -35,18 +36,20 @@ std::string mode_label(const SDL_DisplayMode &m) {
 const char *set_label(const std::string &set) { return set == "daytona" ? "Revision A (1994)" : "Deluxe '93"; }
 
 std::string game_for_set(const std::string &set) {
-#if defined(M2_MOBILE) || defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+#ifdef M2_MULTI_ROMSETS
+    return rt::supports_rom_set(set) ? set : ""; // selected in this process after the old game shuts down
+#elif defined(M2_MOBILE) || defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
     (void)set;
     return ""; // one set per app
 #else
-    const char *base = SDL_GetBasePath(); // this executable's folder, with its separator
-    if (!base) return "";
+    const auto base = executable_dir();
+    if (base.empty()) return "";
 #ifdef _WIN32
     const char *ext = ".exe";
 #else
     const char *ext = "";
 #endif
-    const std::string path = std::string(base) + (set == "daytona" ? "daytona-rev" : "daytona-93") + ext;
+    const std::string path = (base / (std::string(set == "daytona" ? "daytona-rev" : "daytona-93") + ext)).string();
     std::error_code ec;
     return std::filesystem::is_regular_file(path, ec) ? path : "";
 #endif
@@ -63,14 +66,14 @@ void apply_fullscreen_mode(SDL_Window *window, const std::string &key) {
         SDL_SetWindowFullscreenMode(window, nullptr); // borderless, at the desktop's mode
 }
 
-Launcher::Launcher(Config &cfg, SDL_Window *window) : cfg_(cfg), window_(window) {
+Launcher::Launcher(Config &cfg, SDL_Window *window, const std::string &rom_override) : cfg_(cfg), window_(window) {
     std::snprintf(link_next_buf_, sizeof link_next_buf_, "%s", cfg_.link_next.c_str());
 #ifdef SDL_PLATFORM_ANDROID
     // Older mobile builds saved the picker result (content://...) directly.
     // Do not reopen such a URI during startup: Android's temporary document
     // grant may be stale, and the picker/JNI path is not part of launcher
     // construction. Ask the user to browse again and import it then.
-    if (RomFile::is_content_uri(cfg_.rom_path)) {
+    if (rom_override.empty() && RomFile::is_content_uri(cfg_.rom_path)) {
         cfg_.rom_path.clear();
         path_buf_[0] = '\0';
         cfg_.save();
@@ -78,7 +81,7 @@ Launcher::Launcher(Config &cfg, SDL_Window *window) : cfg_(cfg), window_(window)
         return;
     }
 #endif
-    std::snprintf(path_buf_, sizeof path_buf_, "%s", cfg_.rom_path.c_str());
+    std::snprintf(path_buf_, sizeof path_buf_, "%s", (rom_override.empty() ? cfg_.rom_path : rom_override).c_str());
     check_rom();
 }
 
@@ -86,44 +89,54 @@ void Launcher::check_rom() {
     checks_.clear();
     rom_ok_ = false;
     other_set_.clear(), other_game_.clear(), other_rom_.clear();
-    if (cfg_.rom_path.empty()) {
-        rom_message_ = "Choose your " M2_ROMSET " ROM set (.zip or .7z).";
+    if (!path_buf_[0]) {
+        rom_message_ = std::string("Choose your ") + rt::rom_set_name() + " ROM set (.zip or .7z).";
         return;
     }
     try {
         // Android's picker grants access to a content URI, not a raw /sdcard
         // path. Stage it through SDL's Android reader before the plain-file
         // archive code verifies it. Invalid imports never replace a good copy.
-        RomFile selected(cfg_.rom_path);
+        RomFile selected(path_buf_);
         checks_ = rt::check_rom_set(selected.path());
         int good = 0;
         for (const auto &c : checks_) good += c.ok;
         const bool verified = !checks_.empty() && good == int(checks_.size());
         if (verified) {
-            std::string path = selected.commit();
+            std::string path = selected.commit(rt::rom_set_name());
             // Keep ordinary paths absolute, including the saved Android copy.
             std::error_code ec;
             const auto abs = std::filesystem::absolute(path, ec);
             if (!ec && std::filesystem::exists(abs, ec)) path = abs.lexically_normal().string();
             if (cfg_.rom_path != path) {
                 cfg_.rom_path = path;
-                std::snprintf(path_buf_, sizeof path_buf_, "%s", path.c_str());
                 cfg_.save();
             }
+            std::snprintf(path_buf_, sizeof path_buf_, "%s", path.c_str());
         }
         // Do not enable Start if committing the imported archive failed.
         rom_ok_ = verified;
         rom_message_ = rom_ok_ ? "All " + std::to_string(good) + " files verified."
                                : std::to_string(int(checks_.size()) - good) + " of " + std::to_string(checks_.size()) +
-                                     " files missing or wrong: this is not the " M2_ROMSET " set.";
+                                     " files missing or wrong: this is not the " + rt::rom_set_name() + " set.";
         if (!verified) { // the other set: its own game, if it is built beside this one
             const auto sets = rt::rom_sets_in(selected.path());
-            if (!sets.empty() && sets.front() != M2_ROMSET) {
+            if (!sets.empty() && sets.front() != rt::rom_set_name()) {
                 other_set_ = sets.front();
                 other_game_ = game_for_set(other_set_);
                 std::error_code ec;
-                const auto abs = std::filesystem::absolute(selected.path(), ec);
-                other_rom_ = ec ? selected.path() : abs.lexically_normal().string();
+                std::string other_path = selected.path();
+#ifdef M2_MULTI_ROMSETS
+                // rom_sets_in verified the complete candidate manifest. Commit
+                // Android's temporary import before RomFile leaves this scope.
+                if (!other_game_.empty()) other_path = selected.commit(other_set_);
+#endif
+                const auto abs = std::filesystem::absolute(other_path, ec);
+                other_rom_ = ec ? other_path : abs.lexically_normal().string();
+#ifdef M2_MULTI_ROMSETS
+                if (!other_game_.empty())
+                    std::snprintf(path_buf_, sizeof path_buf_, "%s", other_rom_.c_str());
+#endif
                 const std::string what = std::string("This is the ") + set_label(other_set_) + " set (" + other_set_ + ")";
                 rom_message_ = !other_game_.empty() ? what + ": Start opens that game."
 #if defined(M2_MOBILE) || defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
@@ -135,6 +148,8 @@ void Launcher::check_rom() {
             }
         }
     } catch (const std::exception &e) {
+        rom_ok_ = false;
+        other_set_.clear(), other_game_.clear(), other_rom_.clear();
         rom_message_ = e.what();
     }
 }
@@ -259,10 +274,12 @@ Launcher::Result Launcher::draw(bool game_running, const Devices &devices) {
     {
         std::lock_guard<std::mutex> g(dialog_mutex_);
         if (!dialog_result_.empty()) {
-            cfg_.rom_path = dialog_result_;
+            std::snprintf(path_buf_, sizeof path_buf_, "%s", dialog_result_.c_str());
             dialog_result_.clear();
-            std::snprintf(path_buf_, sizeof path_buf_, "%s", cfg_.rom_path.c_str());
+#ifndef M2_MULTI_ROMSETS
+            cfg_.rom_path = path_buf_;
             cfg_.save();
+#endif
             check_rom();
         }
     }
@@ -292,22 +309,39 @@ Launcher::Result Launcher::draw(bool game_running, const Devices &devices) {
     if (ImGui::BeginTabBar("tabs")) {
         if (ImGui::BeginTabItem("Game")) {
             ImGui::Spacing();
+#ifdef M2_MULTI_ROMSETS
+            int version = std::string(rt::rom_set_name()) == "daytona" ? 1 : 0;
+            ImGui::BeginDisabled(dialog_pending_);
+            if (ImGui::Combo("Version", &version, "Deluxe '93\0Revision A (1994)\0")) {
+                const std::string selected_set = version ? "daytona" : "daytona93";
+                // Keep a just-verified archive when its version is selected.
+                if (other_set_ != selected_set || !other_game_ready()) other_rom_.clear();
+                other_set_ = selected_set;
+                other_game_ = other_set_;
+                result = ChangeGame;
+            }
+            ImGui::EndDisabled();
+#endif
             ImGui::TextUnformatted("ROM set");
 #ifdef SDL_PLATFORM_ANDROID
             ImGui::TextWrapped("Browse grants read access to your ZIP/7z. A verified copy is kept in app storage.");
 #endif
             ImGui::SetNextItemWidth(-200);
             if (ImGui::InputText("##rom", path_buf_, sizeof path_buf_, ImGuiInputTextFlags_EnterReturnsTrue)) {
+#ifndef M2_MULTI_ROMSETS
                 cfg_.rom_path = path_buf_;
                 cfg_.save();
+#endif
                 check_rom();
             }
             ImGui::SameLine();
             if (ImGui::Button("Browse...", ImVec2(90, 0)) && !dialog_pending_) browse();
             ImGui::SameLine();
             if (ImGui::Button("Check", ImVec2(90, 0))) {
+#ifndef M2_MULTI_ROMSETS
                 cfg_.rom_path = path_buf_;
                 cfg_.save();
+#endif
                 check_rom();
             }
             // The other game's set is good news too (Start opens that game): green, not the problem colour.

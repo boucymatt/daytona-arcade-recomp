@@ -1,4 +1,5 @@
 #include "app/config.h"
+#include "runtime/rom_import.h"
 #include "runtime/scenery.h"
 
 #include <algorithm>
@@ -15,7 +16,8 @@ namespace app {
 
 std::string Config::pref_dir() {
     // per ROM set (and profile): settings, EEPROM, backup RAM
-    const std::string app = profile.empty() ? std::string(M2_ROMSET) : std::string(M2_ROMSET) + "-" + profile;
+    const std::string romset = rt::rom_set_name();
+    const std::string app = profile.empty() ? romset : romset + "-" + profile;
     char *base = SDL_GetPrefPath("daytona-recomp", app.c_str());
     std::string p = base ? std::string(base) : std::string();
     SDL_free(base);

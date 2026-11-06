@@ -47,8 +47,9 @@ In short:
    Tools. Setup installs them, or adds the Clang tools to the Visual Studio
    you have; Windows asks for permission for that. `setup.ps1 --msvc` uses
    Microsoft's compiler instead.
-3. Run the command setup prints at the end (`build/daytona`, or
-   `build\Release\daytona.exe` on Windows).
+3. Run the command setup prints at the end (`open build/daytona.app` on
+   macOS, `build/daytona` on Linux, or `build\Release\daytona.exe` on
+   Windows). On macOS you can also double-click `build/daytona.app` in Finder.
 
 **Updating:** `git pull`, then run setup again (it recompiles the game from
 your ROM set, since updates can change the generated code).
@@ -88,10 +89,14 @@ than in MAME, so MAME lockstep and trace comparisons need the default output)
 but runs faster, above all on the PS Vita (`scripts/build_vita.py
 --fast-inaccuracy` makes the Vita's own code that way, see
 [platform/vita/README.md](platform/vita/README.md)). Start the game with the launcher,
-`build/daytona`: choose either ROM set there and it opens that game. The two
+`build/daytona` (`build/daytona.app` on macOS): choose either ROM set there
+and it opens that game. The two
 games are beside it, `build/daytona-93` (Deluxe '93) and `build/daytona-rev`
 (Revision A, whose code is built in `build-daytona/`), each with its own
-settings and saves. Its factory settings are a linked twin cabinet, which
+settings and saves. On macOS, `build/daytona.app` contains the launcher and
+both available games; you can move it to Applications and open it there.
+Choose your ROM archive in the launcher; ROMs stay outside the app.
+Revision A's factory settings are a linked twin cabinet, which
 waits for a second cabinet: set a single cabinet once in test mode (F2).
 
 ## Link play (the 1994 set)
@@ -107,6 +112,12 @@ GAME SYSTEM set **LINK ID** (one MASTER, the others SLAVE) and a different
 e.g. 15112 and 15113, each the other's as next.
 
 ## Playing
+
+macOS:
+
+    open build/daytona.app
+
+Linux:
 
     build/daytona
 

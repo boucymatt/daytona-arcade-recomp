@@ -99,9 +99,7 @@ Setup prints each step. It is done when you see:
 
     == Done
 
-    Daytona USA Deluxe '93 (daytona93) is built. Start it with:
-
-        build/daytona
+    Daytona USA Deluxe '93 (daytona93) is built (build/daytona-93).
 
 With Revision A in `roms/` too, it is built as well, beside the first:
 
@@ -110,6 +108,9 @@ With Revision A in `roms/` too, it is built as well, beside the first:
     Start it with the launcher (choose your ROM set there; it opens that game):
 
         build/daytona
+
+On macOS, the launch command is `open build/daytona.app`. You can also
+double-click `daytona.app` in Finder.
 
 If it stops before that, see [Troubleshooting](#troubleshooting).
 
@@ -140,7 +141,18 @@ The cross build reuses committed shaders and does not run target executables.
 
 ## 4. Play
 
-macOS and Linux:
+macOS:
+
+    open build/daytona.app
+
+Or double-click `build/daytona.app` in Finder. The app contains the launcher
+and both available games, so you can move it to Applications. Select your
+ROM archive in the launcher; ROMs stay outside the app. Settings and saves
+remain in your user data folder when you move or rebuild the app.
+With a multi-configuration generator, the app is `build/Release/daytona.app`;
+use the path setup prints.
+
+Linux:
 
     build/daytona
 
@@ -156,8 +168,9 @@ have the window wait until the game closes, use
 shortcut, the game writes its messages to `daytona.log` in its settings
 folder (see Starting again from scratch for where that is).
 
-`build/daytona` (`build\Release\daytona.exe` on Windows) is the launcher for
-both games: the one file to start. Beside it are the games themselves,
+`build/daytona.app` on macOS, `build/daytona` on Linux, and
+`build\Release\daytona.exe` on Windows are the launcher for both games.
+The command-line games are also built beside it,
 `daytona-93` (Deluxe '93) and `daytona-rev` (Revision A), each with its own
 settings and saves. Choose either set's ROM in the launcher: for the other
 set, **Start Revision A (1994)** (or **Start Deluxe '93**) opens that game

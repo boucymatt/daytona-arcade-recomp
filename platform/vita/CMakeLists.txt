@@ -120,7 +120,7 @@ target_compile_options(vita_ymfm PRIVATE -w)
 # The same native runtime as the desktop; no refcore or interpreter is linked.
 # geo.cpp is replaced by its Vita version (platform/vita/src/runtime/geo.cpp),
 # which compiles the original unchanged and runs it on its own core.
-set(RUNTIME_FILES enhance cpu tgp m2_tgp_board raster video m2_board game_loop zip rom_import
+set(RUNTIME_FILES enhance cpu tgp m2_tgp_board raster video m2_board game_loop zip rom_import rom_set
     archive m2_replay_bus lockstep snd_cpu multipcm sound_board native_sample_mixer native_sound_sequencer native_sound_engine
     comm_board)
 set(RUNTIME_SOURCES)

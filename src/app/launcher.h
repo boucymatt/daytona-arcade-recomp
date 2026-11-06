@@ -26,16 +26,17 @@ void apply_fullscreen_mode(SDL_Window *window, const std::string &mode);
 // One launcher for both games: each ROM set is its own build, and setup puts
 // both executables in one folder with the launcher (daytona): daytona-93
 // (Deluxe '93, daytona93) and daytona-rev (Revision A, 1994, daytona). The
-// other set's executable beside this one, or "" where there is none: not
-// built, or a one-set app (mobile, consoles).
+// other set's executable beside this one, or "" where there is none.
+// Dual-set mobile apps return the set name for an in-process switch.
 std::string game_for_set(const std::string &set);
 const char *set_label(const std::string &set); // "Deluxe '93", "Revision A (1994)"
 
 class Launcher {
 public:
-    Launcher(Config &cfg, SDL_Window *window);
+    Launcher(Config &cfg, SDL_Window *window, const std::string &rom_override = {});
 
-    enum Result { Stay, StartGame, Resume, Reset, Quit, OtherGame }; // OtherGame: start the other set's game
+    // OtherGame starts a verified archive; ChangeGame opens a version's launcher.
+    enum Result { Stay, StartGame, Resume, Reset, Quit, OtherGame, ChangeGame };
     // Returns true if the event was consumed (binding capture).
     bool handle_event(const SDL_Event &e);
     // Draw the interface (between ImGui::NewFrame and ImGui::Render).
@@ -46,6 +47,7 @@ public:
     // (other_game()) with this archive (other_rom()).
     bool other_game_ready() const { return !rom_ok_ && !other_game_.empty(); }
     const std::string &other_game() const { return other_game_; }
+    const std::string &other_set() const { return other_set_; }
     const std::string &other_rom() const { return other_rom_; }
     void set_error(const std::string &e) { error_ = e; }
     void set_ffb_device(const char *kind) { ffb_device_ = kind; } // what force feedback is playing on
