@@ -113,6 +113,31 @@ With Revision A in `roms/` too, it is built as well, beside the first:
 
 If it stops before that, see [Troubleshooting](#troubleshooting).
 
+### Build Windows executables from Linux
+
+Install CMake, Ninja, and the x86-64 MinGW-w64 C/C++ compiler and resource
+compiler. Run `./setup.sh` on Linux first with your ROMs in `roms/`: this
+fetches dependencies and generates the game C++ using native Linux tools.
+Then run:
+
+```sh
+python3 scripts/build_windows.py
+```
+
+This builds whichever ROM sets have generated code, using separate
+`build-windows/` and `build-windows-daytona/` directories. The launcher
+`daytona.exe` and games `daytona-93.exe` and/or `daytona-rev.exe` are placed
+together in `build-windows/`. Copy those executables to Windows, start
+`daytona.exe`, and select your ROM archive there. No ROMs are embedded.
+SDL and the compiler runtimes are linked statically; Windows system DLLs
+are still required. Windows runtime testing is separate from cross-compilation.
+
+Use `--set daytona93` or `--set daytona` to select one game, `-j 2` to limit
+build parallelism, `--build-dir PATH` for another output directory, or
+`--host-build-dir PATH` if your native build is somewhere other than `build/`.
+The Revision A native build is expected at `PATH-daytona/`.
+The cross build reuses committed shaders and does not run target executables.
+
 ## 4. Play
 
 macOS and Linux:
